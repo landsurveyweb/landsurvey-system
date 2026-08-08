@@ -35,11 +35,13 @@ document.getElementById("signupButton").addEventListener("click", async () => {
     const { data, error } = await supabase.auth.signUp({
         email: document.getElementById("email").value.trim(),
         password: document.getElementById("password").value,
-        options: { data: { display_name: displayName } }
+        options: {
+            data: { display_name: displayName },
+            emailRedirectTo: new URL("./", location.href).href
+        }
     });
     setBusy(false);
     if (error) message.textContent = error.message;
     else if (data.session) location.replace(returnUrl);
     else message.textContent = "帳號已建立，請到信箱完成驗證後登入。";
 });
-
