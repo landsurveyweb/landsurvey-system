@@ -2,6 +2,9 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
 
 const message = document.getElementById("authMessage");
+if (new URLSearchParams(location.search).get("disabled") === "1") {
+    message.textContent = "此帳號已停用，請聯絡管理員。";
+}
 if (SUPABASE_URL.includes("YOUR_PROJECT") || SUPABASE_ANON_KEY.includes("YOUR_SUPABASE")) {
     message.textContent = "請先依 README 設定 Supabase。";
     throw new Error("Supabase 尚未設定");

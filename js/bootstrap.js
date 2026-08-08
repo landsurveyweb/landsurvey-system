@@ -20,10 +20,21 @@ if (!session) {
     throw new Error("尚未登入");
 }
 
+const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("display_name, role, is_active")
+    .eq("id", session.user.id)
+    .single();
+if (profileError || !profile?.is_active) {
+    await supabase.auth.signOut();
+    location.replace("./login.html?disabled=1");
+    throw new Error("帳號已停用或會員資料無法讀取");
+}
+
 window.landSurveySupabase = supabase;
-window.landSurveyCurrentUser = { isAdmin: false, id: session.user.id };
-document.getElementById("currentUserName").textContent =
-    session.user.user_metadata?.display_name || session.user.email || "使用者";
+window.landSurveyCurrentUser = { isAdmin: profile.role === "admin", id: session.user.id };
+document.getElementById("currentUserName").textContent = profile.display_name || session.user.email || "使用者";
+document.getElementById("adminLink").hidden = profile.role !== "admin";
 
 document.getElementById("logoutButton").addEventListener("click", async () => {
     await supabase.auth.signOut();
@@ -55,4 +66,3 @@ supabase.channel("landsurvey-shared-data")
     .subscribe(status => {
         syncStatus.textContent = status === "SUBSCRIBED" ? "● 已同步" : "○ 連線中";
     });
-
