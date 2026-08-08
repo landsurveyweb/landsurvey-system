@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>登入｜土地測量資料分享系統</title>
+    <link rel="icon" href="./favicon.ico" />
+    <link rel="stylesheet" href="./css/auth.css" />
+</head>
+<body>
+    <main class="auth-page">
+        <section class="auth-card">
+            <h1>土地測量資料分享系統</h1>
+            <p>登入後即可與其他會員共同管理及同步點位。</p>
+            <form id="authForm">
+                <label>顯示名稱<input id="displayName" autocomplete="name" placeholder="註冊時填寫" /></label>
+                <label>電子郵件<input id="email" type="email" autocomplete="email" required /></label>
+                <label>密碼<input id="password" type="password" minlength="6" autocomplete="current-password" required /></label>
+                <button id="loginButton" type="submit">登入</button>
+                <button id="signupButton" type="button">建立新帳號</button>
+            </form>
+            <div id="authMessage" role="status"></div>
+        </section>
+    </main>
+    <script type="module" src="./js/login.js"></script>
+</body>
+</html>
+

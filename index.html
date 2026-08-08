@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8" />
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+
+    <title>土地測量資料分享系統</title>
+    <link rel="icon" href="./favicon.ico" />
+
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+
+    <link
+        rel="stylesheet"
+        href="./css/map.css"
+    />
+</head>
+
+<body>
+    <header class="app-header">
+    
+        <button
+            id="sidebarToggleButton"
+            class="header-menu-button"
+            type="button"
+            aria-label="開啟或關閉側邊欄"
+        >
+            ☰
+        </button>
+
+        <div>
+            <div class="header-title">
+                土地測量資料分享系統
+            </div>
+
+            <div class="header-subtitle">
+                TWD97 / TM2 121 · LandSurvey v1.0.0
+            </div>
+        </div>
+        <div class="header-user-panel">
+            <span id="syncStatus" class="header-user-name">連線中…</span>
+            <span id="currentUserName" class="header-user-name"></span>
+            <button id="logoutButton" class="header-logout-button" type="button">登出</button>
+        </div>
+    </header>
+
+    <div class="app-shell">
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-scroll">
+                <section class="sidebar-section">
+                    <h2 class="section-title">
+                        點位管理
+                    </h2>
+
+                    <button
+                        id="startAddPointButton"
+                        class="action-button action-button-primary"
+                        type="button"
+                    >
+                        ＋ 新增正式點位
+                    </button>
+
+                    <button
+                        id="addNotePlaceholderButton"
+                        class="action-button action-button-secondary"
+                        type="button"
+                    >
+                        ⭐ 新增備註點位
+                    </button>
+                </section>
+
+                <section class="sidebar-section">
+                    <h2 class="section-title">
+                        搜尋點位
+                    </h2>
+
+                    <div class="input-row">
+                        <input
+                            id="pointSearchInput"
+                            class="text-input"
+                            type="text"
+                            placeholder="輸入點名"
+                            autocomplete="off"
+                        />
+
+                        <button
+                            id="pointSearchButton"
+                            class="small-button"
+                            type="button"
+                        >
+                            搜尋
+                        </button>
+                    </div>
+
+                    <div
+                        id="searchResultPanel"
+                        class="search-result-panel hidden"
+                    ></div>
+                </section>
+
+                                <section class="sidebar-section">
+                    <h2 class="section-title">
+                        搜尋地址
+                    </h2>
+
+                    <div class="input-row">
+                        <input
+                            id="addressSearchInput"
+                            class="text-input"
+                            type="search"
+                            placeholder="例如：長安東路二段10號"
+                            autocomplete="street-address"
+                        />
+
+                        <button
+                            id="addressSearchButton"
+                            class="small-button"
+                            type="button"
+                        >
+                            搜尋
+                        </button>
+                    </div>
+
+                    <div
+                        id="addressSearchResultPanel"
+                        class="search-result-panel hidden"
+                    ></div>
+                </section>
+
+                
+
+                <section class="sidebar-section">
+                    <h2 class="section-title">
+                        匯入點位
+                    </h2>
+
+                    <button
+                        id="importPlaceholderButton"
+                        class="action-button"
+                        type="button"
+                    >
+                        ⇧ 匯入 .ct2
+                    </button>
+
+                    <div class="help-text">
+                        Q 開頭歸類為補點，其餘歸類為圖根點。
+                    </div>
+                </section>
+
+                <section class="sidebar-section">
+                    <h2 class="section-title">
+                        圖層
+                    </h2>
+
+                    <label class="layer-row">
+                        <input
+    id="baseMapToggle"
+    name="baseMapSelection"
+    type="radio"
+    value="street"
+    checked
+/>
+
+                        <span>OpenStreetMap</span>
+                    </label>
+
+                                        <label class="layer-row">
+                        <input
+    id="aerialMapToggle"
+    name="baseMapSelection"
+    type="radio"
+    value="aerial"
+/>
+
+                        <span>臺灣正射影像（航照圖）</span>
+                    </label>
+
+                    <label class="layer-row">
+                        <input
+                            id="controlLayerToggle"
+                            type="checkbox"
+                            checked
+                        />
+
+                        <span class="legend-dot legend-control"></span>
+                        <span>圖根點</span>
+                    </label>
+
+                    <label class="layer-row">
+                        <input
+                            id="supplementLayerToggle"
+                            type="checkbox"
+                            checked
+                        />
+
+                        <span class="legend-dot legend-supplement"></span>
+                        <span>補點</span>
+                    </label>
+
+                    <label class="layer-row">
+                        <input
+                            id="missingLayerToggle"
+                            type="checkbox"
+                            checked
+                        />
+
+                        <span class="legend-dot legend-missing"></span>
+                        <span>已滅失點位</span>
+                    </label>
+
+                    <label class="layer-row">
+                        <input
+                            id="sectionLayerToggle"
+                            type="checkbox"
+                        />
+
+                        <span class="legend-line"></span>
+                        <span>地籍段界</span>
+                    </label>
+
+                    <label class="layer-row">
+                        <input
+                            id="noteLayerToggle"
+                            type="checkbox"
+                            checked
+                        />
+
+                        <span>⭐</span>
+                        <span>備註點位</span>
+                    </label>
+                </section>
+
+                <section class="sidebar-section">
+                    <button
+                        id="locateButton"
+                        class="action-button"
+                        type="button"
+                    >
+                        ◎ 定位目前位置
+                    </button>
+                </section>
+
+                <section class="sidebar-section">
+    <details>
+        <summary
+            class="section-title"
+            style="cursor:pointer;"
+        >
+            地籍段／點位列表
+        </summary>
+
+        <div
+            id="pointListPanel"
+            class="point-list-panel"
+            style="margin-top:10px;"
+        >
+            正在載入點位……
+        </div>
+    </details>
+</section>
+            </div>
+        </aside>
+
+        <main class="map-area">
+            <div id="map"></div>
+
+            <div
+                id="coordinatePanel"
+                class="coordinate-panel"
+            >
+                <div class="coordinate-title">
+                    TWD97
+                </div>
+
+                <div>X：---</div>
+                <div>Y：---</div>
+            </div>
+
+            <div
+                id="mapMessage"
+                class="map-message hidden"
+            ></div>
+        </main>
+    </div>
+
+    <div
+        id="screenOverlay"
+        class="screen-overlay hidden"
+    ></div>
+
+    <div
+        id="contextMenu"
+        class="context-menu hidden"
+    >
+        <button
+            id="contextAddPointButton"
+            type="button"
+        >
+            📍 新增正式點位
+        </button>
+
+        <button
+            id="contextAddNoteButton"
+            type="button"
+        >
+            ⭐ 新增備註點位
+        </button>
+
+        <button
+            id="contextCopyCoordinateButton"
+            type="button"
+        >
+            📋 複製此處座標
+        </button>
+    </div>
+
+    <dialog
+        id="pointDialog"
+        class="app-dialog"
+    >
+        <form method="dialog">
+            <div class="dialog-header">
+                <h2 id="pointDialogTitle">
+                    新增正式點位
+                </h2>
+
+                <button
+                    class="dialog-close-button"
+                    value="cancel"
+                    aria-label="關閉"
+                >
+                    ×
+                </button>
+            </div>
+
+            <div class="dialog-body">
+                <label class="form-field">
+                    <span>點名</span>
+
+                    <input
+                        id="pointNameInput"
+                        type="text"
+                        maxlength="100"
+                        placeholder="例如 AC0419"
+                        autocomplete="off"
+                    />
+                </label>
+
+                <div class="form-grid">
+                    <label class="form-field">
+                        <span>X</span>
+
+                        <input
+                            id="pointXInput"
+                            type="number"
+                            step="0.001"
+                        />
+                    </label>
+
+                    <label class="form-field">
+                        <span>Y</span>
+
+                        <input
+                            id="pointYInput"
+                            type="number"
+                            step="0.001"
+                        />
+                    </label>
+                </div>
+
+                <label class="form-field">
+                    <span>點位類型</span>
+
+                    <select id="pointTypeInput">
+                        <option value="control">
+                            圖根點
+                        </option>
+
+                        <option value="supplement">
+                            補點
+                        </option>
+                    </select>
+                </label>
+
+                <label class="form-field">
+                    <span>狀態</span>
+
+                    <select id="pointStatusInput">
+                        <option value="active">
+                            正常
+                        </option>
+
+                        <option value="missing">
+                            已滅失
+                        </option>
+
+                        <option value="pending">
+                            待確認
+                        </option>
+                    </select>
+                </label>
+
+                <div class="auto-section-panel">
+                    地籍段將由座標自動判定。
+                </div>
+
+                <label class="form-field">
+                    <span>備註</span>
+
+                    <textarea
+                        id="pointRemarkInput"
+                        rows="4"
+                        maxlength="2000"
+                    ></textarea>
+                </label>
+
+                <div
+                    id="duplicateWarningPanel"
+                    class="duplicate-warning-panel hidden"
+                ></div>
+            </div>
+
+            <div class="dialog-footer">
+                <button
+                    class="dialog-button"
+                    value="cancel"
+                >
+                    取消
+                </button>
+
+                <button
+                    id="savePointButton"
+                    class="dialog-button dialog-button-primary"
+                    type="button"
+                >
+                    儲存
+                </button>
+            </div>
+        </form>
+    </dialog>
+
+<input
+    id="ct2FileInput"
+    type="file"
+    accept=".ct2"
+    hidden
+/>
+
+<dialog
+    id="importDialog"
+    class="app-dialog import-dialog"
+>
+    <div class="dialog-header">
+        <h2>匯入 .ct2 點位</h2>
+
+        <button
+            id="closeImportDialogButton"
+            class="dialog-close-button"
+            type="button"
+            aria-label="關閉"
+        >
+            ×
+        </button>
+    </div>
+
+    <div class="dialog-body">
+        <div
+            id="importFileName"
+            class="auto-section-panel"
+        >
+            尚未選擇檔案
+        </div>
+
+        <div
+            id="importSummary"
+            class="auto-section-panel"
+        >
+            請先選擇 .ct2 檔案。
+        </div>
+
+        <div
+            style="
+                max-height: 380px;
+                overflow: auto;
+                border: 1px solid #d9dde3;
+                border-radius: 7px;
+            "
+        >
+            <table
+                style="
+                    width: 100%;
+                    border-collapse: collapse;
+                    font-size: 13px;
+                "
+            >
+                <thead>
+                    <tr>
+                        <th style="padding:8px;">行</th>
+                        <th style="padding:8px;">點名</th>
+                        <th style="padding:8px;">X</th>
+                        <th style="padding:8px;">Y</th>
+                        <th style="padding:8px;">類型</th>
+                        <th style="padding:8px;">結果</th>
+                    </tr>
+                </thead>
+
+                <tbody id="importPreviewBody">
+                    <tr>
+                        <td
+                            colspan="6"
+                            style="
+                                padding: 18px;
+                                text-align: center;
+                            "
+                        >
+                            尚未解析檔案
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="dialog-footer">
+        <button
+            id="chooseAnotherCt2Button"
+            class="dialog-button"
+            type="button"
+        >
+            重新選擇
+        </button>
+
+        <button
+            id="cancelImportButton"
+            class="dialog-button"
+            type="button"
+        >
+            關閉
+        </button>
+
+        <button
+            id="importPointsButton"
+            class="dialog-button dialog-button-primary"
+            type="button"
+            disabled
+        >
+            確認匯入
+        </button>
+    </div>
+</dialog>
+
+<dialog
+    id="historyDialog"
+    class="app-dialog history-dialog"
+>
+    <div class="dialog-header">
+        <h2 id="historyDialogTitle">
+            點位操作歷程
+        </h2>
+
+        <button
+            id="closeHistoryDialogButton"
+            class="dialog-close-button"
+            type="button"
+            aria-label="關閉歷程視窗"
+        >
+            ×
+        </button>
+    </div>
+
+    <div class="dialog-body">
+        <div
+            id="historyList"
+            class="history-list"
+        >
+            尚未載入操作歷程
+        </div>
+    </div>
+
+    <div class="dialog-footer">
+        <button
+            id="cancelHistoryDialogButton"
+            class="dialog-button"
+            type="button"
+        >
+            關閉
+        </button>
+    </div>
+</dialog>
+    <dialog
+    id="noteDialog"
+    class="app-dialog"
+>
+    <form method="dialog">
+        <div class="dialog-header">
+            <h2 id="noteDialogTitle">
+                新增備註點位
+            </h2>
+
+            <button
+                class="dialog-close-button"
+                value="cancel"
+                aria-label="關閉"
+            >
+                ×
+            </button>
+        </div>
+
+        <div class="dialog-body">
+            <label class="form-field">
+                <span>圖示／Emoji</span>
+
+                <input
+                    id="noteEmojiInput"
+                    type="text"
+                    maxlength="32"
+                    value="⭐"
+                    placeholder="例如 📍、⭐、⚠️"
+                    autocomplete="off"
+                />
+            </label>
+
+            <div class="form-grid">
+                <label class="form-field">
+                    <span>X</span>
+
+                    <input
+                        id="noteXInput"
+                        type="number"
+                        step="0.001"
+                    />
+                </label>
+
+                <label class="form-field">
+                    <span>Y</span>
+
+                    <input
+                        id="noteYInput"
+                        type="number"
+                        step="0.001"
+                    />
+                </label>
+            </div>
+
+            <label class="form-field">
+                <span>備註</span>
+
+                <textarea
+                    id="noteRemarkInput"
+                    rows="5"
+                    maxlength="2000"
+                    placeholder="輸入這個位置的說明"
+                ></textarea>
+            </label>
+        </div>
+
+        <div class="dialog-footer">
+            <button
+                id="deleteNoteButton"
+                class="dialog-button hidden"
+                type="button"
+            >
+                刪除
+            </button>
+
+            <button
+                class="dialog-button"
+                value="cancel"
+            >
+                取消
+            </button>
+
+            <button
+                id="saveNoteButton"
+                class="dialog-button dialog-button-primary"
+                type="button"
+            >
+                儲存
+            </button>
+        </div>
+    </form>
+</dialog>
+
+
+
+    <dialog
+    id="photoDialog"
+    class="photo-dialog"
+>
+    <div class="photo-dialog-header">
+        <h2 id="photoDialogTitle">
+            點位照片
+        </h2>
+
+        <button
+            id="closePhotoDialogButton"
+            class="photo-dialog-close-button"
+            type="button"
+            aria-label="關閉照片視窗"
+        >
+            ×
+        </button>
+    </div>
+
+    <div
+        id="photoList"
+        class="photo-list"
+    >
+        尚未載入照片
+    </div>
+
+    <div class="photo-dialog-footer">
+                <!-- 手機相機 -->
+        <input
+            id="cameraPhotoInput"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            hidden
+        />
+
+        <!-- 手機相簿或電腦檔案 -->
+        <input
+            id="photoFileInput"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+            hidden
+        />
+
+        <button
+            id="cameraPhotoButton"
+            class="photo-upload-button"
+            type="button"
+        >
+            📷 開啟相機
+        </button>
+
+        <button
+            id="uploadPhotoButton"
+            class="photo-upload-button"
+            type="button"
+        >
+            📁 選擇檔案
+        </button>
+
+        <button
+            id="cancelPhotoDialogButton"
+            class="photo-cancel-button"
+            type="button"
+        >
+            關閉
+        </button>
+    </div>
+</dialog>
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    ></script>
+
+    <script
+        src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.12.1/proj4.js"
+    ></script>
+
+    <script type="module" src="./js/bootstrap.js"></script>
+    
+</body>
+</html>
