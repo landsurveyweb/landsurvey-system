@@ -143,6 +143,22 @@ body {
     background: #eaf1fb;
 }
 
+.auth-secondary-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.auth-secondary-actions button {
+    color: #46505c;
+    font-weight: 700;
+    background: #f1f3f5;
+}
+
+.auth-secondary-actions button:hover {
+    background: #e3e7eb;
+}
+
 #authMessage {
     min-height: 24px;
     margin-top: 14px;
