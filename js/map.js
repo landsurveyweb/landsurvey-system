@@ -3246,6 +3246,19 @@ function populateParcelSectionOptions(geoJson) {
     parcelSectionsLoaded = true;
 }
 
+function populateParcelSectionCatalog(items) {
+    if (parcelSectionsLoaded || !Array.isArray(items)) return;
+    const select = document.getElementById("parcelSectionSelect");
+    if (!select) return;
+    for (const item of [...items].sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"))) {
+        const option = document.createElement("option");
+        option.value = String(item.code).padStart(4, "0");
+        option.textContent = item.name;
+        select.appendChild(option);
+    }
+    parcelSectionsLoaded = select.options.length > 1;
+}
+
 function normalizeParcelNumber(value) {
     const text = String(value ?? "").trim().replace(/－/g, "-");
     if (!text) return "";
@@ -3302,7 +3315,8 @@ async function loadAndSearchParcels() {
         closeMobileSidebar();
     } catch (error) {
         console.error(error);
-        status.textContent = "地籍資料載入失敗，請確認帳號權限或稍後再試。";
+        const detail = error?.message ? `（${error.message}）` : "";
+        status.textContent = `地籍資料載入失敗${detail}`;
     }
 }
 
@@ -3316,6 +3330,7 @@ document.getElementById("parcelClearButton")?.addEventListener("click", () => {
     document.getElementById("parcelStatus").textContent = "已清除地籍圖。";
 });
 
+populateParcelSectionCatalog(window.PARCEL_SECTIONS);
 loadSections();
 
 async function compressPhotoForUpload(file) {
