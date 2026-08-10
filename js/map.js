@@ -410,7 +410,17 @@ function getPointTraverseInfoHtml(pointId) {
         <div class="point-traverse-title">導線資料</div>
         ${memberships.map(({ route, previousPoint, nextPoint }) => `
             <div class="point-traverse-item" style="border-left-color:${route.color}">
-                <strong>${escapeHtml(route.name)}</strong>
+                <div class="point-traverse-item-heading">
+                    <strong>${escapeHtml(route.name)}</strong>
+                    <button
+                        type="button"
+                        class="point-traverse-delete-button"
+                        onclick="event.stopPropagation(); deleteTraverseRoute(${route.id})"
+                        aria-label="刪除導線 ${escapeHtml(route.name)}"
+                        title="刪除這條導線">
+                        刪除導線
+                    </button>
+                </div>
                 <div>從：${escapeHtml(previousPoint?.pointName || "—（導線起點）")}</div>
                 <div>拉出：${escapeHtml(nextPoint?.pointName || "—（導線終點）")}</div>
             </div>
@@ -942,11 +952,13 @@ window.updateTraverseColor = async function (routeId) {
 window.deleteTraverseRoute = async function (routeId) {
     const route = allTraverseRoutes.find(item => item.id === routeId);
     if (!route || !window.confirm(`確定刪除導線「${route.name}」嗎？`)) return;
+    const affectedPointIds = route.points.map(item => item.pointId);
     const { error } = await window.landSurveySupabase
         .from("traverse_routes").delete().eq("id", routeId);
     if (error) return showMessage(`刪除導線失敗：${error.message}`);
     await loadTraverses();
-    clearDisplayedTraverses();
+    affectedPointIds.forEach(updatePointTraversePopup);
+    if (activeTraversePointId) showTraversesForSupplement(activeTraversePointId);
 };
 
 function renderTraverseRouteList() {
