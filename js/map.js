@@ -743,7 +743,8 @@ function drawTraverseRoute(route, displayColor) {
 
         // 第一段是後視點到設站點，只畫直線；其餘段落顯示前進方向。
         if (index === 1) continue;
-        const ratio = 0.68;
+        // 箭頭放在線段尾端，稍微離開目標點以免被點位圓標遮住。
+        const ratio = 0.9;
         const arrowLatLng = L.latLng(
             from.latitude + (to.latitude - from.latitude) * ratio,
             from.longitude + (to.longitude - from.longitude) * ratio
