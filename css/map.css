@@ -955,3 +955,24 @@ button {
 .parcel-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
 .parcel-actions .action-button, .parcel-actions .secondary-button { min-height:42px; }
 .parcel-status { margin:9px 0 0; color:#64748b; font-size:.82rem; line-height:1.45; }
+
+.leaflet-tooltip.parcel-number-label {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: #172033;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    text-shadow:
+        -1px -1px 0 #fff,
+         1px -1px 0 #fff,
+        -1px  1px 0 #fff,
+         1px  1px 0 #fff;
+    pointer-events: none;
+}
+
+.leaflet-tooltip.parcel-number-label::before {
+    display: none;
+}
