@@ -18,7 +18,7 @@
 
     <link
         rel="stylesheet"
-        href="./css/map.css?v=202608101225"
+        href="./css/map.css?v=202608101620"
     />
 </head>
 
@@ -232,6 +232,12 @@
                     </label>
 
                     <label class="layer-row">
+                        <input id="traverseLayerToggle" type="checkbox" checked />
+                        <span class="legend-line traverse-legend-line"></span>
+                        <span>導線</span>
+                    </label>
+
+                    <label class="layer-row">
                         <input
                             id="noteLayerToggle"
                             type="checkbox"
@@ -241,6 +247,26 @@
                         <span>⭐</span>
                         <span>備註點位</span>
                     </label>
+                </section>
+
+                <section class="sidebar-section">
+                    <details id="traverseManagementDetails">
+                        <summary class="section-title" style="cursor:pointer;">導線管理</summary>
+                        <button id="startTraverseButton" class="action-button" type="button">＋ 建立導線</button>
+                        <div id="traverseEditorPanel" class="traverse-editor hidden">
+                            <label class="field-label" for="traverseNameInput">導線名稱</label>
+                            <input id="traverseNameInput" class="text-input" type="text" placeholder="例如：導線 A" />
+                            <label class="field-label" for="traverseColorInput">導線顏色</label>
+                            <input id="traverseColorInput" class="traverse-color-input" type="color" value="#111827" />
+                            <p id="traverseStepText" class="parcel-status"></p>
+                            <ol id="traverseSelectedPoints" class="traverse-selected-list"></ol>
+                            <div class="parcel-actions">
+                                <button id="saveTraverseButton" class="action-button" type="button" disabled>儲存導線</button>
+                                <button id="cancelTraverseButton" class="secondary-button" type="button">取消</button>
+                            </div>
+                        </div>
+                        <div id="traverseRouteList" class="traverse-route-list">正在載入導線……</div>
+                    </details>
                 </section>
 
                 <section class="sidebar-section">
@@ -791,7 +817,7 @@
 
     <script src="./js/parcel-sections.js?v=202608101200"></script>
 
-    <script type="module" src="./js/bootstrap.js?v=202608101225"></script>
+    <script type="module" src="./js/bootstrap.js?v=202608101620"></script>
     
 </body>
 </html>
