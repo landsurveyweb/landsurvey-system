@@ -3139,21 +3139,25 @@ async function uploadSelectedPhoto(
     }
 
     const pointId = currentPhotoPointId;
-    const file = inputElement.files[0];
-
-    const formData = new FormData();
-    formData.append("file", file);
+    const originalFile = inputElement.files[0];
 
     cameraPhotoButton.disabled = true;
     uploadPhotoButton.disabled = true;
 
     cameraPhotoButton.textContent =
-        "上傳中……";
+        "壓縮中……";
 
     uploadPhotoButton.textContent =
-        "上傳中……";
+        "壓縮中……";
 
     try {
+        const file = await compressPhotoForUpload(originalFile);
+        const formData = new FormData();
+        formData.append("file", file);
+
+        cameraPhotoButton.textContent = "上傳中……";
+        uploadPhotoButton.textContent = "上傳中……";
+
         const response = await fetch(
             `/api/points/${pointId}/photos`,
             {
@@ -3189,7 +3193,10 @@ async function uploadSelectedPhoto(
 
         await loadPointPhotos(pointId);
 
-        showMessage("照片已上傳");
+        const savedPercent = originalFile.size > 0
+            ? Math.max(0, Math.round((1 - file.size / originalFile.size) * 100))
+            : 0;
+        showMessage(`照片已壓縮並上傳（節省 ${savedPercent}%）`);
     } catch (error) {
         console.error(error);
 
@@ -3207,6 +3214,49 @@ async function uploadSelectedPhoto(
         uploadPhotoButton.textContent =
             "📁 選擇檔案";
     }
+}
+
+async function compressPhotoForUpload(file) {
+    if (!file.type.startsWith("image/")) {
+        throw new Error("請選擇圖片檔案。");
+    }
+
+    let bitmap;
+    try {
+        bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch {
+        // 部分瀏覽器無法直接解碼 HEIC；此時保留原檔，避免照片無法上傳。
+        return file;
+    }
+
+    const maximumSide = 1280;
+    const scale = Math.min(1, maximumSide / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: false });
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close?.();
+
+    const toBlob = quality => new Promise(resolve =>
+        canvas.toBlob(resolve, "image/webp", quality)
+    );
+    let compressed = null;
+    for (const quality of [0.62, 0.52, 0.44, 0.36]) {
+        compressed = await toBlob(quality);
+        if (!compressed || compressed.size <= 250 * 1024) break;
+    }
+
+    if (!compressed || compressed.size >= file.size) return file;
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "photo";
+    return new File([compressed], `${baseName}.webp`, {
+        type: "image/webp",
+        lastModified: Date.now()
+    });
 }
 
 cameraPhotoInput.addEventListener(
