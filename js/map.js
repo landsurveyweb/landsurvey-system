@@ -385,6 +385,44 @@ function getTargetLayer(point) {
         : controlPointLayer;
 }
 
+function getPointTraverseInfoHtml(pointId) {
+    const memberships = allTraverseRoutes
+        .map(route => {
+            const index = route.points.findIndex(item => item.pointId === pointId);
+            if (index < 0) return null;
+            const previousItem = index > 0 ? route.points[index - 1] : null;
+            const nextItem = index < route.points.length - 1 ? route.points[index + 1] : null;
+            const previousPoint = previousItem
+                ? allPoints.find(point => point.id === previousItem.pointId)
+                : null;
+            const nextPoint = nextItem
+                ? allPoints.find(point => point.id === nextItem.pointId)
+                : null;
+            return { route, previousPoint, nextPoint };
+        })
+        .filter(Boolean);
+
+    if (memberships.length === 0) {
+        return `<div class="point-popup-row traverse-popup-empty">導線：未加入導線</div>`;
+    }
+
+    return `<div class="point-traverse-info">
+        <div class="point-traverse-title">導線資料</div>
+        ${memberships.map(({ route, previousPoint, nextPoint }) => `
+            <div class="point-traverse-item" style="border-left-color:${route.color}">
+                <strong>${escapeHtml(route.name)}</strong>
+                <div>從：${escapeHtml(previousPoint?.pointName || "—（導線起點）")}</div>
+                <div>拉出：${escapeHtml(nextPoint?.pointName || "—（導線終點）")}</div>
+            </div>
+        `).join("")}
+    </div>`;
+}
+
+function updatePointTraversePopup(pointId) {
+    const container = document.getElementById(`pointTraverseInfo-${pointId}`);
+    if (container) container.innerHTML = getPointTraverseInfoHtml(pointId);
+}
+
 function createPointMarker(point) {
     const marker = L.circleMarker(
     [point.latitude, point.longitude],
@@ -600,6 +638,10 @@ window.showPointHistory =
             : ""
         }
 
+        <div id="pointTraverseInfo-${point.id}">
+            ${getPointTraverseInfoHtml(point.id)}
+        </div>
+
                 <div class="point-popup-user-info">
             <div>
                 上傳者：
@@ -701,6 +743,7 @@ window.showPointHistory =
         }
     });
     marker.on("popupopen", () => {
+    updatePointTraversePopup(point.id);
     marker.setStyle(
         getPointMarkerStyle(
             point,
