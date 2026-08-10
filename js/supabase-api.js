@@ -6,6 +6,41 @@ const jsonResponse = (body, status = 200, headers = {}) => new Response(
 const noContent = () => new Response(null, { status: 204 });
 const errorResponse = (error, status = 400) => jsonResponse({ message: error?.message || String(error) }, status);
 const round3 = value => Math.round(Number(value) * 1000) / 1000;
+const originalFetch = window.fetch.bind(window);
+let sectionsPromise;
+
+const loadSectionFeatures = async () => {
+    sectionsPromise ??= originalFetch("./sections.geojson").then(response => {
+        if (!response.ok) throw new Error("無法載入地籍段界資料。");
+        return response.json();
+    }).then(data => data.features || []);
+    return sectionsPromise;
+};
+
+const pointInRing = (longitude, latitude, ring) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i], [xj, yj] = ring[j];
+        if (((yi > latitude) !== (yj > latitude)) &&
+            longitude < (xj - xi) * (latitude - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+};
+
+const pointInPolygon = (longitude, latitude, rings) =>
+    rings.length > 0 && pointInRing(longitude, latitude, rings[0]) &&
+    !rings.slice(1).some(ring => pointInRing(longitude, latitude, ring));
+
+async function findSectionName(longitude, latitude) {
+    const features = await loadSectionFeatures();
+    const feature = features.find(item => {
+        const geometry = item.geometry;
+        if (geometry?.type === "Polygon") return pointInPolygon(longitude, latitude, geometry.coordinates);
+        if (geometry?.type === "MultiPolygon") return geometry.coordinates.some(polygon => pointInPolygon(longitude, latitude, polygon));
+        return false;
+    });
+    return feature?.properties?.fullName || feature?.properties?.sectionName || null;
+}
 
 const pointFromRow = row => ({
     id: row.id,
@@ -121,12 +156,13 @@ async function pointPayload(supabase, user, body, excludedId = null) {
     const warnings = await duplicateWarnings(supabase, pointName, x, y, excludedId);
     if (warnings.length && !body.allowDuplicate) return { warnings };
     const { longitude, latitude } = coordinates(x, y);
+    const sectionName = await findSectionName(longitude, latitude);
     return {
         payload: {
             point_name: pointName,
             point_type: body.pointType === "supplement" ? "supplement" : "control",
             status: ["active", "missing", "pending"].includes(body.status) ? body.status : "active",
-            x, y, longitude, latitude,
+            x, y, longitude, latitude, section_name: sectionName,
             remark: String(body.remark || "").trim() || null,
             updated_by: user.id
         }
@@ -145,7 +181,12 @@ export function installApiAdapter(supabase, user) {
             if (url.pathname === "/api/points" && method === "GET") {
                 const { data, error } = await supabase.from("survey_points").select("*").order("id");
                 if (error) throw error;
-                return jsonResponse(data.map(pointFromRow));
+                const points = await Promise.all(data.map(async row => {
+                    const point = pointFromRow(row);
+                    if (!point.sectionName) point.sectionName = await findSectionName(point.longitude, point.latitude);
+                    return point;
+                }));
+                return jsonResponse(points);
             }
 
             if (url.pathname === "/api/points" && method === "POST") {
@@ -246,9 +287,10 @@ export function installApiAdapter(supabase, user) {
                         continue;
                     }
                     const { longitude, latitude } = coordinates(item.x, item.y);
+                    const sectionName = await findSectionName(longitude, latitude);
                     const { error } = await supabase.from("survey_points").insert({
                         point_name: item.pointName, point_type: item.pointType, status: "active",
-                        x: item.x, y: item.y, longitude, latitude,
+                        x: item.x, y: item.y, longitude, latitude, section_name: sectionName,
                         remark: `由 ${file.name} 匯入`, created_by: user.id, updated_by: user.id,
                         import_source: file.name
                     });
@@ -315,7 +357,9 @@ export function installApiAdapter(supabase, user) {
             }
 
             if (url.pathname === "/api/system/sections-geojson" && method === "GET") {
-                return jsonResponse({ type: "FeatureCollection", features: [] });
+                const response = await originalFetch("./sections.geojson");
+                if (!response.ok) throw new Error("無法載入地籍段界資料。");
+                return new Response(await response.text(), { headers: { "Content-Type": "application/geo+json; charset=utf-8" } });
             }
 
             if (url.pathname === "/api/addresses/search" && method === "GET") {
@@ -339,4 +383,3 @@ export function installApiAdapter(supabase, user) {
         }
     };
 }
-
