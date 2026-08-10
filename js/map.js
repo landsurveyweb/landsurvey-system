@@ -68,6 +68,18 @@ const sectionLayer =
         }
     });
 
+const parcelLayer = L.geoJSON(null, {
+    style: { color: "#e87916", weight: 1, fillColor: "#fbbf24", fillOpacity: 0.08 },
+    onEachFeature(feature, layer) {
+        const p = feature.properties ?? {};
+        const area = p.registeredArea || p.calculatedArea || "未提供";
+        layer.bindPopup(`<strong>${escapeHtml(p.sectionName || "地籍")}</strong><br>地號：${escapeHtml(p.landNo || "未提供")}<br>登記面積：${escapeHtml(String(area))} 平方公尺`);
+    }
+}).addTo(map);
+
+let loadedParcelSectionCode = "";
+let parcelSectionsLoaded = false;
+
 proj4.defs(
     "EPSG:3826",
     "+proj=tmerc +lat_0=0 +lon_0=121 +k=0.9999 " +
@@ -3375,17 +3387,6 @@ async function compressPhotoForUpload(file) {
         lastModified: Date.now()
     });
 
-const parcelLayer = L.geoJSON(null, {
-    style: { color: "#e87916", weight: 1, fillColor: "#fbbf24", fillOpacity: 0.08 },
-    onEachFeature(feature, layer) {
-        const p = feature.properties ?? {};
-        const area = p.registeredArea || p.calculatedArea || "未提供";
-        layer.bindPopup(`<strong>${escapeHtml(p.sectionName || "地籍")}</strong><br>地號：${escapeHtml(p.landNo || "未提供")}<br>登記面積：${escapeHtml(String(area))} 平方公尺`);
-    }
-}).addTo(map);
-
-let loadedParcelSectionCode = "";
-let parcelSectionsLoaded = false;
 }
 
 cameraPhotoInput.addEventListener(
