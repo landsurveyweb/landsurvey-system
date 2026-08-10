@@ -45,7 +45,7 @@ installApiAdapter(supabase, session.user);
 
 await new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "./js/map.js?v=202608101225";
+    script.src = "./js/map.js?v=202608101620";
     script.onload = resolve;
     script.onerror = reject;
     document.body.appendChild(script);
@@ -57,12 +57,15 @@ const refreshSharedData = () => {
     window.__landSurveyRefreshTimer = window.setTimeout(() => {
         window.loadPoints?.();
         window.loadNotes?.();
+        window.loadTraverses?.();
     }, 200);
 };
 
 supabase.channel("landsurvey-shared-data")
     .on("postgres_changes", { event: "*", schema: "public", table: "survey_points" }, refreshSharedData)
     .on("postgres_changes", { event: "*", schema: "public", table: "map_notes" }, refreshSharedData)
+    .on("postgres_changes", { event: "*", schema: "public", table: "traverse_routes" }, refreshSharedData)
+    .on("postgres_changes", { event: "*", schema: "public", table: "traverse_route_points" }, refreshSharedData)
     .subscribe(status => {
         syncStatus.textContent = status === "SUBSCRIBED" ? "● 已同步" : "○ 連線中";
     });

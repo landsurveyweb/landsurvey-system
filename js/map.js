@@ -47,6 +47,9 @@ const missingPointLayer =
 const noteLayer =
     L.layerGroup().addTo(map);
 
+const traverseLineLayer =
+    L.layerGroup().addTo(map);
+
 const sectionLayer =
     L.geoJSON(null, {
         style: {
@@ -201,6 +204,14 @@ let currentCt2Preview = null;
 
 let allPoints = [];
 let markerByPointId = new Map();
+let allTraverseRoutes = [];
+let traverseBuildState = null;
+let activeTraversePointId = null;
+
+const traverseColorPalette = [
+    "#111827", "#dc2626", "#2563eb", "#16a34a",
+    "#9333ea", "#ea580c", "#0891b2", "#be123c"
+];
 
 let contextLatLng = null;
 
@@ -676,6 +687,19 @@ window.showPointHistory =
 `);
 
     marker.addTo(getTargetLayer(point));
+    marker.on("click", () => {
+        if (traverseBuildState) {
+            window.setTimeout(() => map.closePopup(), 0);
+            selectTraverseBuildPoint(point);
+            return;
+        }
+
+        if (point.pointType === "supplement") {
+            showTraversesForSupplement(point.id);
+        } else {
+            clearDisplayedTraverses();
+        }
+    });
     marker.on("popupopen", () => {
     marker.setStyle(
         getPointMarkerStyle(
@@ -697,6 +721,239 @@ marker.on("popupclose", () => {
 });
     markerByPointId.set(point.id, marker);
 }
+
+function clearDisplayedTraverses() {
+    traverseLineLayer.clearLayers();
+    activeTraversePointId = null;
+}
+
+function drawTraverseRoute(route, displayColor) {
+    const points = route.points
+        .map(item => allPoints.find(point => point.id === item.pointId))
+        .filter(Boolean);
+    if (points.length < 2) return;
+
+    for (let index = 1; index < points.length; index += 1) {
+        const from = points[index - 1];
+        const to = points[index];
+        L.polyline(
+            [[from.latitude, from.longitude], [to.latitude, to.longitude]],
+            { color: displayColor, weight: 4, opacity: 0.9 }
+        ).addTo(traverseLineLayer);
+
+        // 第一段是後視點到設站點，只畫直線；其餘段落顯示前進方向。
+        if (index === 1) continue;
+        const ratio = 0.68;
+        const arrowLatLng = L.latLng(
+            from.latitude + (to.latitude - from.latitude) * ratio,
+            from.longitude + (to.longitude - from.longitude) * ratio
+        );
+        const fromPixel = map.latLngToLayerPoint([from.latitude, from.longitude]);
+        const toPixel = map.latLngToLayerPoint([to.latitude, to.longitude]);
+        const angle = Math.atan2(toPixel.y - fromPixel.y, toPixel.x - fromPixel.x) * 180 / Math.PI;
+        L.marker(arrowLatLng, {
+            interactive: false,
+            icon: L.divIcon({
+                className: "traverse-arrow-icon",
+                iconSize: [18, 18],
+                iconAnchor: [9, 9],
+                html: `<div class="traverse-arrow-shape" style="color:${displayColor};transform:rotate(${angle}deg)"></div>`
+            })
+        }).addTo(traverseLineLayer);
+    }
+}
+
+function showTraversesForSupplement(pointId) {
+    activeTraversePointId = pointId;
+    traverseLineLayer.clearLayers();
+    if (!document.getElementById("traverseLayerToggle")?.checked) return;
+    const routes = allTraverseRoutes.filter(route =>
+        route.points.some(item => item.pointId === pointId && item.role === "forward")
+    );
+    const usedColors = new Set();
+    routes.forEach((route, index) => {
+        let color = route.color || traverseColorPalette[index % traverseColorPalette.length];
+        if (usedColors.has(color.toLowerCase())) {
+            color = traverseColorPalette.find(item => !usedColors.has(item.toLowerCase()))
+                || traverseColorPalette[index % traverseColorPalette.length];
+        }
+        usedColors.add(color.toLowerCase());
+        drawTraverseRoute(route, color);
+    });
+}
+
+function nextTraverseInstruction() {
+    const count = traverseBuildState?.points.length ?? 0;
+    if (count === 0) return "請在地圖點選後視圖根點。";
+    if (count === 1) return "請點選設站圖根點。";
+    return "請依序點選補點；完成後回到此處儲存。";
+}
+
+function updateTraverseEditor() {
+    const list = document.getElementById("traverseSelectedPoints");
+    const status = document.getElementById("traverseStepText");
+    if (!traverseBuildState || !list || !status) return;
+    status.textContent = nextTraverseInstruction();
+    list.innerHTML = traverseBuildState.points.map((item, index) => {
+        const roleName = index === 0 ? "後視" : index === 1 ? "設站" : "補點";
+        return `<li>${escapeHtml(item.pointName)}（${roleName}）</li>`;
+    }).join("");
+    document.getElementById("saveTraverseButton").disabled = traverseBuildState.points.length < 3;
+}
+
+function selectTraverseBuildPoint(point) {
+    if (!traverseBuildState) return;
+    const index = traverseBuildState.points.length;
+    if (traverseBuildState.points.some(item => item.pointId === point.id)) {
+        showMessage("同一個點不能在一條導線中重複。 ");
+        return;
+    }
+    if (index < 2 && point.pointType !== "control") {
+        showMessage(index === 0 ? "後視點必須是圖根點。" : "設站點必須是圖根點。");
+        return;
+    }
+    if (index >= 2 && point.pointType !== "supplement") {
+        showMessage("後續點必須是補點。 ");
+        return;
+    }
+    traverseBuildState.points.push({
+        pointId: point.id,
+        pointName: point.pointName,
+        role: index === 0 ? "backsight" : index === 1 ? "station" : "forward"
+    });
+    updateTraverseEditor();
+    showMessage(`${point.pointName} 已加入。${nextTraverseInstruction()}`);
+}
+
+function startTraverseCreation() {
+    const used = new Set(allTraverseRoutes.map(route => String(route.color).toLowerCase()));
+    const suggestedColor = traverseColorPalette.find(color => !used.has(color.toLowerCase()))
+        || traverseColorPalette[allTraverseRoutes.length % traverseColorPalette.length];
+    traverseBuildState = { points: [] };
+    document.getElementById("traverseEditorPanel").classList.remove("hidden");
+    document.getElementById("traverseRouteList").classList.add("hidden");
+    document.getElementById("traverseNameInput").value = `導線 ${allTraverseRoutes.length + 1}`;
+    document.getElementById("traverseColorInput").value = suggestedColor;
+    updateTraverseEditor();
+    closeMobileSidebar();
+    showMessage(nextTraverseInstruction());
+}
+
+function cancelTraverseCreation() {
+    traverseBuildState = null;
+    document.getElementById("traverseEditorPanel").classList.add("hidden");
+    document.getElementById("traverseRouteList").classList.remove("hidden");
+}
+
+async function saveTraverseRoute() {
+    if (!traverseBuildState || traverseBuildState.points.length < 3) return;
+    const name = document.getElementById("traverseNameInput").value.trim();
+    const color = document.getElementById("traverseColorInput").value;
+    if (!name) {
+        showMessage("請輸入導線名稱。 ");
+        return;
+    }
+    const supabase = window.landSurveySupabase;
+    const button = document.getElementById("saveTraverseButton");
+    button.disabled = true;
+    let routeId = null;
+    try {
+        const { data: route, error: routeError } = await supabase
+            .from("traverse_routes")
+            .insert({ name, color })
+            .select("id")
+            .single();
+        if (routeError) throw routeError;
+        routeId = route.id;
+        const rows = traverseBuildState.points.map((item, sequence) => ({
+            route_id: routeId,
+            point_id: item.pointId,
+            sequence,
+            role: item.role
+        }));
+        const { error: pointsError } = await supabase.from("traverse_route_points").insert(rows);
+        if (pointsError) throw pointsError;
+        cancelTraverseCreation();
+        await loadTraverses();
+        showMessage(`已建立導線「${name}」。`);
+    } catch (error) {
+        console.error(error);
+        if (routeId) await supabase.from("traverse_routes").delete().eq("id", routeId);
+        showMessage(`建立導線失敗：${error.message || "未知錯誤"}`);
+        button.disabled = false;
+    }
+}
+
+window.updateTraverseColor = async function (routeId) {
+    const input = document.getElementById(`traverseColor-${routeId}`);
+    const route = allTraverseRoutes.find(item => item.id === routeId);
+    if (!input || !route) return;
+    const { error } = await window.landSurveySupabase
+        .from("traverse_routes").update({ color: input.value }).eq("id", routeId);
+    if (error) return showMessage(`更新顏色失敗：${error.message}`);
+    await loadTraverses();
+    if (activeTraversePointId) showTraversesForSupplement(activeTraversePointId);
+};
+
+window.deleteTraverseRoute = async function (routeId) {
+    const route = allTraverseRoutes.find(item => item.id === routeId);
+    if (!route || !window.confirm(`確定刪除導線「${route.name}」嗎？`)) return;
+    const { error } = await window.landSurveySupabase
+        .from("traverse_routes").delete().eq("id", routeId);
+    if (error) return showMessage(`刪除導線失敗：${error.message}`);
+    await loadTraverses();
+    clearDisplayedTraverses();
+};
+
+function renderTraverseRouteList() {
+    const panel = document.getElementById("traverseRouteList");
+    if (!panel) return;
+    if (allTraverseRoutes.length === 0) {
+        panel.textContent = "目前沒有導線。";
+        return;
+    }
+    panel.innerHTML = allTraverseRoutes.map(route => {
+        const names = route.points.map(item =>
+            allPoints.find(point => point.id === item.pointId)?.pointName || "已刪除點位"
+        ).join(" → ");
+        return `<div class="traverse-route-item">
+            <div class="traverse-route-heading"><span class="traverse-route-swatch" style="background:${route.color}"></span>${escapeHtml(route.name)}</div>
+            <div class="parcel-status">${escapeHtml(names)}</div>
+            <div class="traverse-route-actions">
+                <input id="traverseColor-${route.id}" type="color" value="${route.color}" aria-label="導線顏色">
+                <button type="button" onclick="updateTraverseColor(${route.id})">更新顏色</button>
+                <button type="button" onclick="deleteTraverseRoute(${route.id})">刪除</button>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+async function loadTraverses() {
+    try {
+        const { data, error } = await window.landSurveySupabase
+            .from("traverse_routes")
+            .select("id,name,color,created_by,traverse_route_points(point_id,sequence,role)")
+            .order("id");
+        if (error) throw error;
+        allTraverseRoutes = (data || []).map(route => ({
+            id: route.id,
+            name: route.name,
+            color: route.color,
+            createdBy: route.created_by,
+            points: (route.traverse_route_points || [])
+                .sort((a, b) => a.sequence - b.sequence)
+                .map(item => ({ pointId: item.point_id, sequence: item.sequence, role: item.role }))
+        }));
+        renderTraverseRouteList();
+        if (activeTraversePointId) showTraversesForSupplement(activeTraversePointId);
+    } catch (error) {
+        console.error(error);
+        const panel = document.getElementById("traverseRouteList");
+        if (panel) panel.textContent = "導線載入失敗。";
+    }
+}
+
+window.loadTraverses = loadTraverses;
 
 async function loadPoints() {
     try {
@@ -720,6 +977,7 @@ async function loadPoints() {
         allPoints.forEach(createPointMarker);
 
         renderPointList();
+        await loadTraverses();
 
         if (allPoints.length > 0) {
             const bounds = L.latLngBounds(
@@ -2545,6 +2803,20 @@ document.getElementById("parcelLayerToggle")?.addEventListener("change", event =
         map.removeLayer(parcelLayer);
     }
 });
+
+document.getElementById("traverseLayerToggle")?.addEventListener("change", event => {
+    if (event.target.checked) {
+        traverseLineLayer.addTo(map);
+        if (activeTraversePointId) showTraversesForSupplement(activeTraversePointId);
+    } else {
+        traverseLineLayer.clearLayers();
+        map.removeLayer(traverseLineLayer);
+    }
+});
+
+document.getElementById("startTraverseButton")?.addEventListener("click", startTraverseCreation);
+document.getElementById("cancelTraverseButton")?.addEventListener("click", cancelTraverseCreation);
+document.getElementById("saveTraverseButton")?.addEventListener("click", saveTraverseRoute);
 
 ct2FileInput.addEventListener(
     "change",
