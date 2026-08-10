@@ -1057,6 +1057,7 @@ async function loadSections() {
 
         sectionLayer.clearLayers();
         sectionLayer.addData(geoJson);
+        populateParcelSectionOptions(geoJson);
     } catch (error) {
         console.error(error);
 
@@ -2516,6 +2517,14 @@ document.getElementById(
     }
 });
 
+document.getElementById("parcelLayerToggle")?.addEventListener("change", event => {
+    if (event.target.checked) {
+        parcelLayer.addTo(map);
+    } else {
+        map.removeLayer(parcelLayer);
+    }
+});
+
 ct2FileInput.addEventListener(
     "change",
     async () => {
@@ -3216,6 +3225,99 @@ async function uploadSelectedPhoto(
     }
 }
 
+function populateParcelSectionOptions(geoJson) {
+    if (parcelSectionsLoaded) return;
+    const select = document.getElementById("parcelSectionSelect");
+    if (!select) return;
+    const items = (geoJson.features ?? []).map(feature => {
+        const p = feature.properties ?? {};
+        return {
+            code: String(p.sectionCode ?? p.SECTION_COD ?? "").trim(),
+            name: String(p.sectionName ?? p.fullName ?? "").trim()
+        };
+    }).filter(item => item.code && item.name)
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
+    for (const item of items) {
+        const option = document.createElement("option");
+        option.value = item.code.padStart(4, "0");
+        option.textContent = item.name;
+        select.appendChild(option);
+    }
+    parcelSectionsLoaded = true;
+}
+
+function normalizeParcelNumber(value) {
+    const text = String(value ?? "").trim().replace(/－/g, "-");
+    if (!text) return "";
+    if (/^\d{8}$/.test(text)) return text;
+    const match = text.match(/^(\d+)(?:-(\d+))?$/);
+    if (!match) return null;
+    return match[1].padStart(4, "0") + (match[2] || "0").padStart(4, "0");
+}
+
+async function loadAndSearchParcels() {
+    const sectionCode = document.getElementById("parcelSectionSelect").value;
+    const input = document.getElementById("parcelNumberInput").value;
+    const status = document.getElementById("parcelStatus");
+    if (!sectionCode) {
+        status.textContent = "請先選擇地籍段。";
+        return;
+    }
+    const normalized = normalizeParcelNumber(input);
+    if (normalized === null) {
+        status.textContent = "地號格式不正確，請輸入 123 或 123-1。";
+        return;
+    }
+    try {
+        status.textContent = "正在從安全資料庫載入地籍圖……";
+        if (loadedParcelSectionCode !== sectionCode) {
+            const { data, error } = await window.landSurveySupabase.storage
+                .from("cadastral-data").download(`${sectionCode}.geojson`);
+            if (error) throw error;
+            const geoJson = JSON.parse(await data.text());
+            parcelLayer.clearLayers();
+            parcelLayer.addData(geoJson);
+            loadedParcelSectionCode = sectionCode;
+            if (!map.hasLayer(parcelLayer)) parcelLayer.addTo(map);
+        }
+        let found = null;
+        parcelLayer.eachLayer(layer => {
+            const raw = String(layer.feature?.properties?.landNoRaw ?? "");
+            layer.setStyle?.({ color: "#e87916", weight: 1, fillOpacity: 0.08 });
+            if (normalized && raw === normalized) found = layer;
+        });
+        if (normalized) {
+            if (!found) {
+                status.textContent = "此地籍段找不到該地號。";
+                return;
+            }
+            found.setStyle?.({ color: "#dc2626", weight: 3, fillOpacity: 0.22 });
+            map.fitBounds(found.getBounds(), { maxZoom: 20, padding: [24, 24] });
+            found.openPopup();
+            status.textContent = "已定位地號。";
+        } else {
+            map.fitBounds(parcelLayer.getBounds(), { padding: [20, 20] });
+            status.textContent = `已載入本段 ${parcelLayer.getLayers().length.toLocaleString()} 筆地籍，可直接點選查看。`;
+        }
+        closeMobileSidebar();
+    } catch (error) {
+        console.error(error);
+        status.textContent = "地籍資料載入失敗，請確認帳號權限或稍後再試。";
+    }
+}
+
+document.getElementById("parcelSearchButton")?.addEventListener("click", loadAndSearchParcels);
+document.getElementById("parcelNumberInput")?.addEventListener("keydown", event => {
+    if (event.key === "Enter") loadAndSearchParcels();
+});
+document.getElementById("parcelClearButton")?.addEventListener("click", () => {
+    parcelLayer.clearLayers();
+    loadedParcelSectionCode = "";
+    document.getElementById("parcelStatus").textContent = "已清除地籍圖。";
+});
+
+loadSections();
+
 async function compressPhotoForUpload(file) {
     if (!file.type.startsWith("image/")) {
         throw new Error("請選擇圖片檔案。");
@@ -3257,6 +3359,18 @@ async function compressPhotoForUpload(file) {
         type: "image/webp",
         lastModified: Date.now()
     });
+
+const parcelLayer = L.geoJSON(null, {
+    style: { color: "#e87916", weight: 1, fillColor: "#fbbf24", fillOpacity: 0.08 },
+    onEachFeature(feature, layer) {
+        const p = feature.properties ?? {};
+        const area = p.registeredArea || p.calculatedArea || "未提供";
+        layer.bindPopup(`<strong>${escapeHtml(p.sectionName || "地籍")}</strong><br>地號：${escapeHtml(p.landNo || "未提供")}<br>登記面積：${escapeHtml(String(area))} 平方公尺`);
+    }
+}).addTo(map);
+
+let loadedParcelSectionCode = "";
+let parcelSectionsLoaded = false;
 }
 
 cameraPhotoInput.addEventListener(
