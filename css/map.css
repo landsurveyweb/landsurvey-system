@@ -948,3 +948,10 @@ button {
     background: #ffffff;
     transform: translate(-50%, -50%);
 }
+
+.parcel-legend-line { border-color: #e87916; }
+.field-label { display:block; margin:10px 0 5px; color:#4b5563; font-size:.86rem; font-weight:700; }
+.text-input { box-sizing:border-box; width:100%; min-height:42px; padding:8px 10px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; color:#172033; font:inherit; }
+.parcel-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+.parcel-actions .action-button, .parcel-actions .secondary-button { min-height:42px; }
+.parcel-status { margin:9px 0 0; color:#64748b; font-size:.82rem; line-height:1.45; }
