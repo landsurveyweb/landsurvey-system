@@ -226,6 +226,12 @@
                     </label>
 
                     <label class="layer-row">
+                        <input id="parcelLayerToggle" type="checkbox" checked />
+                        <span class="legend-line parcel-legend-line"></span>
+                        <span>已載入地籍圖</span>
+                    </label>
+
+                    <label class="layer-row">
                         <input
                             id="noteLayerToggle"
                             type="checkbox"
@@ -235,6 +241,22 @@
                         <span>⭐</span>
                         <span>備註點位</span>
                     </label>
+                </section>
+
+                <section class="sidebar-section">
+                    <h2 class="section-title">地籍查詢</h2>
+                    <label class="field-label" for="parcelSectionSelect">地籍段</label>
+                    <select id="parcelSectionSelect" class="text-input">
+                        <option value="">請選擇地籍段</option>
+                    </select>
+                    <label class="field-label" for="parcelNumberInput">地號</label>
+                    <input id="parcelNumberInput" class="text-input" type="text"
+                        inputmode="numeric" placeholder="例如：123 或 123-1" />
+                    <div class="parcel-actions">
+                        <button id="parcelSearchButton" class="action-button" type="button">載入並查詢</button>
+                        <button id="parcelClearButton" class="secondary-button" type="button">清除地籍圖</button>
+                    </div>
+                    <p id="parcelStatus" class="parcel-status">請先選擇地籍段。</p>
                 </section>
 
                 <section class="sidebar-section">
