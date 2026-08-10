@@ -74,6 +74,15 @@ const parcelLayer = L.geoJSON(null, {
         const p = feature.properties ?? {};
         const area = p.registeredArea || p.calculatedArea || "未提供";
         layer.bindPopup(`<strong>${escapeHtml(p.sectionName || "地籍")}</strong><br>地號：${escapeHtml(p.landNo || "未提供")}<br>登記面積：${escapeHtml(String(area))} 平方公尺`);
+        if (p.landNo) {
+            layer.bindTooltip(escapeHtml(String(p.landNo)), {
+                permanent: true,
+                direction: "center",
+                className: "parcel-number-label",
+                opacity: 1,
+                interactive: false
+            });
+        }
     }
 }).addTo(map);
 
@@ -3300,6 +3309,12 @@ async function loadAndSearchParcels() {
                 .from("cadastral-data").download(`${sectionCode}.geojson`);
             if (error) throw error;
             const geoJson = JSON.parse(await data.text());
+            const selectedOption = document.getElementById("parcelSectionSelect").selectedOptions[0];
+            const correctSectionName = selectedOption?.textContent?.trim() || "地籍";
+            for (const feature of geoJson.features ?? []) {
+                feature.properties ??= {};
+                feature.properties.sectionName = correctSectionName;
+            }
             parcelLayer.clearLayers();
             parcelLayer.addData(geoJson);
             loadedParcelSectionCode = sectionCode;
