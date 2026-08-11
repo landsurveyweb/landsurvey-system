@@ -800,6 +800,22 @@ function drawTraverseRoute(route, displayColor) {
     for (let index = 1; index < points.length; index += 1) {
         const from = points[index - 1];
         const to = points[index];
+
+        // 後視圖根點到設站圖根點固定使用實線。
+        if (index === 1) {
+            L.polyline(
+                [[from.latitude, from.longitude], [to.latitude, to.longitude]],
+                {
+                    color: displayColor,
+                    weight: 4,
+                    opacity: 0.9,
+                    lineCap: "round",
+                    interactive: false
+                }
+            ).addTo(traverseLineLayer);
+            continue;
+        }
+
         const partCount = 10;
 
         // 將每段切成小段：前端是疏虛線，沿前進方向逐漸變密，尾端成為實線。
