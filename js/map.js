@@ -789,31 +789,33 @@ function drawTraverseRoute(route, displayColor) {
     for (let index = 1; index < points.length; index += 1) {
         const from = points[index - 1];
         const to = points[index];
-        L.polyline(
-            [[from.latitude, from.longitude], [to.latitude, to.longitude]],
-            { color: displayColor, weight: 4, opacity: 0.9 }
-        ).addTo(traverseLineLayer);
+        const partCount = 10;
 
-        // 第一段是後視點到設站點，只畫直線；其餘段落顯示前進方向。
-        if (index === 1) continue;
-        // 箭頭放在線段尾端，稍微離開目標點以免被點位圓標遮住。
-        const ratio = 0.9;
-        const arrowLatLng = L.latLng(
-            from.latitude + (to.latitude - from.latitude) * ratio,
-            from.longitude + (to.longitude - from.longitude) * ratio
-        );
-        const fromPixel = map.latLngToLayerPoint([from.latitude, from.longitude]);
-        const toPixel = map.latLngToLayerPoint([to.latitude, to.longitude]);
-        const angle = Math.atan2(toPixel.y - fromPixel.y, toPixel.x - fromPixel.x) * 180 / Math.PI;
-        L.marker(arrowLatLng, {
-            interactive: false,
-            icon: L.divIcon({
-                className: "traverse-arrow-icon",
-                iconSize: [18, 18],
-                iconAnchor: [9, 9],
-                html: `<div class="traverse-arrow-shape" style="color:${displayColor};transform:rotate(${angle}deg)"></div>`
-            })
-        }).addTo(traverseLineLayer);
+        // 將每段切成小段：前端是疏虛線，沿前進方向逐漸變密，尾端成為實線。
+        for (let part = 0; part < partCount; part += 1) {
+            const startRatio = part / partCount;
+            const endRatio = (part + 1) / partCount;
+            const start = [
+                from.latitude + (to.latitude - from.latitude) * startRatio,
+                from.longitude + (to.longitude - from.longitude) * startRatio
+            ];
+            const end = [
+                from.latitude + (to.latitude - from.latitude) * endRatio,
+                from.longitude + (to.longitude - from.longitude) * endRatio
+            ];
+            const progress = part / (partCount - 1);
+            const gap = Math.max(2, Math.round(13 - progress * 12));
+            const dash = Math.round(3 + progress * 7);
+
+            L.polyline([start, end], {
+                color: displayColor,
+                weight: 4,
+                opacity: 0.9,
+                dashArray: part >= partCount - 2 ? null : `${dash} ${gap}`,
+                lineCap: "round",
+                interactive: false
+            }).addTo(traverseLineLayer);
+        }
     }
 }
 
