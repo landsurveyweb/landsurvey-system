@@ -403,11 +403,22 @@ function getPointTraverseInfoHtml(pointId) {
         .filter(Boolean);
 
     if (memberships.length === 0) {
-        return `<div class="point-popup-row traverse-popup-empty">導線：未加入導線</div>`;
+        return `<div class="point-traverse-info">
+            <div class="point-traverse-title-row">
+                <div class="point-traverse-title">導線資料</div>
+                <button type="button" class="point-traverse-create-button"
+                    onclick="event.stopPropagation(); startTraverseCreation()">＋ 建立導線</button>
+            </div>
+            <div class="point-popup-row traverse-popup-empty">尚未加入導線</div>
+        </div>`;
     }
 
     return `<div class="point-traverse-info">
-        <div class="point-traverse-title">導線資料</div>
+        <div class="point-traverse-title-row">
+            <div class="point-traverse-title">導線資料</div>
+            <button type="button" class="point-traverse-create-button"
+                onclick="event.stopPropagation(); startTraverseCreation()">＋ 建立導線</button>
+        </div>
         ${memberships.map(({ route, previousPoint, nextPoint }) => `
             <div class="point-traverse-item" style="border-left-color:${route.color}">
                 <div class="point-traverse-item-heading">
@@ -842,7 +853,7 @@ function nextTraverseInstruction() {
     const count = traverseBuildState?.points.length ?? 0;
     if (count === 0) return "請在地圖點選後視圖根點。";
     if (count === 1) return "請點選設站圖根點。";
-    return "請依序點選補點；完成後回到此處儲存。";
+    return "請依序點選補點；完成後在地圖上按滑鼠右鍵儲存。";
 }
 
 function updateTraverseEditor() {
@@ -894,6 +905,8 @@ function startTraverseCreation() {
     closeMobileSidebar();
     showMessage(nextTraverseInstruction());
 }
+
+window.startTraverseCreation = startTraverseCreation;
 
 function cancelTraverseCreation() {
     traverseBuildState = null;
@@ -2577,6 +2590,15 @@ map.on("mousemove", event => {
 });
 
 map.on("contextmenu", event => {
+    if (traverseBuildState) {
+        closeContextMenu();
+        if (traverseBuildState.points.length < 3) {
+            showMessage("至少要選擇後視圖根點、設站圖根點及一個補點，才能儲存導線。");
+            return;
+        }
+        saveTraverseRoute();
+        return;
+    }
     pointPlacementMode = false;
     map.getContainer().style.cursor = "";
     showContextMenu(event);
