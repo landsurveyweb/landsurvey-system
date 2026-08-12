@@ -423,14 +423,24 @@ function getPointTraverseInfoHtml(pointId) {
             <div class="point-traverse-item" style="border-left-color:${route.color}">
                 <div class="point-traverse-item-heading">
                     <strong>${escapeHtml(route.name)}</strong>
-                    <button
-                        type="button"
-                        class="point-traverse-delete-button"
-                        onclick="event.stopPropagation(); deleteTraverseRoute(${route.id})"
-                        aria-label="刪除導線 ${escapeHtml(route.name)}"
-                        title="刪除這條導線">
-                        刪除導線
-                    </button>
+                    <div class="point-traverse-item-actions">
+                        <button
+                            type="button"
+                            class="point-traverse-edit-button"
+                            onclick="event.stopPropagation(); editTraverseRoute(${route.id})"
+                            aria-label="編輯導線 ${escapeHtml(route.name)}"
+                            title="新增導線點位">
+                            編輯導線
+                        </button>
+                        <button
+                            type="button"
+                            class="point-traverse-delete-button"
+                            onclick="event.stopPropagation(); deleteTraverseRoute(${route.id})"
+                            aria-label="刪除導線 ${escapeHtml(route.name)}"
+                            title="刪除這條導線">
+                            刪除導線
+                        </button>
+                    </div>
                 </div>
                 <div>從：${escapeHtml(previousPoint?.pointName || "—（導線起點）")}</div>
                 <div>拉出：${escapeHtml(nextPoint?.pointName || "—（導線終點）")}</div>
@@ -924,6 +934,31 @@ function startTraverseCreation() {
 
 window.startTraverseCreation = startTraverseCreation;
 
+window.editTraverseRoute = function (routeId) {
+    const route = allTraverseRoutes.find(item => item.id === routeId);
+    if (!route) return;
+    traverseBuildState = {
+        routeId: route.id,
+        originalPointCount: route.points.length,
+        points: route.points.map(item => {
+            const point = allPoints.find(candidate => candidate.id === item.pointId);
+            return {
+                pointId: item.pointId,
+                pointName: point?.pointName || "已刪除點位",
+                role: item.role
+            };
+        })
+    };
+    document.getElementById("traverseEditorPanel").classList.remove("hidden");
+    document.getElementById("traverseRouteList").classList.add("hidden");
+    document.getElementById("traverseNameInput").value = route.name;
+    document.getElementById("traverseColorInput").value = route.color;
+    updateTraverseEditor();
+    map.closePopup();
+    closeMobileSidebar();
+    showMessage("請繼續點選要新增的補點；完成後在地圖上按滑鼠右鍵儲存。");
+};
+
 function cancelTraverseCreation() {
     traverseBuildState = null;
     document.getElementById("traverseEditorPanel").classList.add("hidden");
@@ -941,8 +976,37 @@ async function saveTraverseRoute() {
     const supabase = window.landSurveySupabase;
     const button = document.getElementById("saveTraverseButton");
     button.disabled = true;
+    const editingRouteId = traverseBuildState.routeId || null;
+    const originalPointCount = traverseBuildState.originalPointCount || 0;
     let routeId = null;
     try {
+        if (editingRouteId) {
+            const { error: updateError } = await supabase
+                .from("traverse_routes")
+                .update({ name, color })
+                .eq("id", editingRouteId);
+            if (updateError) throw updateError;
+
+            const newRows = traverseBuildState.points
+                .slice(originalPointCount)
+                .map((item, offset) => ({
+                    route_id: editingRouteId,
+                    point_id: item.pointId,
+                    sequence: originalPointCount + offset,
+                    role: item.role
+                }));
+            if (newRows.length > 0) {
+                const { error: pointsError } = await supabase
+                    .from("traverse_route_points")
+                    .insert(newRows);
+                if (pointsError) throw pointsError;
+            }
+            cancelTraverseCreation();
+            await loadTraverses();
+            showMessage(`已更新導線「${name}」。`);
+            return;
+        }
+
         const { data: route, error: routeError } = await supabase
             .from("traverse_routes")
             .insert({ name, color })
@@ -963,8 +1027,10 @@ async function saveTraverseRoute() {
         showMessage(`已建立導線「${name}」。`);
     } catch (error) {
         console.error(error);
-        if (routeId) await supabase.from("traverse_routes").delete().eq("id", routeId);
-        showMessage(`建立導線失敗：${error.message || "未知錯誤"}`);
+        if (!editingRouteId && routeId) {
+            await supabase.from("traverse_routes").delete().eq("id", routeId);
+        }
+        showMessage(`${editingRouteId ? "更新" : "建立"}導線失敗：${error.message || "未知錯誤"}`);
         button.disabled = false;
     }
 }

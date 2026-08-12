@@ -45,7 +45,7 @@ installApiAdapter(supabase, session.user);
 
 await new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "./js/map.js?v=202608111405";
+    script.src = "./js/map.js?v=202608121000";
     script.onload = resolve;
     script.onerror = reject;
     document.body.appendChild(script);
