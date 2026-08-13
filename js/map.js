@@ -207,6 +207,10 @@ let markerByPointId = new Map();
 let allTraverseRoutes = [];
 let traverseBuildState = null;
 let activeTraversePointId = null;
+let liveLocationWatchId = null;
+let liveLocationMarker = null;
+let liveLocationAccuracyCircle = null;
+let parcelSectionCatalog = [];
 
 const traverseColorPalette = [
     "#111827", "#dc2626", "#2563eb", "#16a34a",
@@ -2564,6 +2568,45 @@ function locateCurrentPosition() {
     );
 }
 
+function updateLiveLocationMarker(position, centerMap = false) {
+    const latLng = [position.coords.latitude, position.coords.longitude];
+    if (!liveLocationMarker) {
+        const icon = L.divIcon({ className: "", html: '<div class="location-marker live-location-marker"></div>', iconSize: [20, 20], iconAnchor: [10, 10] });
+        liveLocationMarker = L.marker(latLng, { icon, zIndexOffset: 1200 }).addTo(map).bindPopup("目前位置（即時更新）");
+        liveLocationAccuracyCircle = L.circle(latLng, { radius: position.coords.accuracy || 0, color: "#2563eb", weight: 1, fillColor: "#60a5fa", fillOpacity: 0.12, interactive: false }).addTo(map);
+    } else {
+        liveLocationMarker.setLatLng(latLng);
+        liveLocationAccuracyCircle?.setLatLng(latLng);
+        liveLocationAccuracyCircle?.setRadius(position.coords.accuracy || 0);
+    }
+    if (centerMap) map.setView(latLng, Math.max(map.getZoom(), 18));
+    else map.panTo(latLng, { animate: true, duration: 0.5 });
+}
+
+function stopLiveLocation() {
+    if (liveLocationWatchId !== null) navigator.geolocation.clearWatch(liveLocationWatchId);
+    liveLocationWatchId = null;
+    const button = document.getElementById("locateButton");
+    if (button) button.textContent = "◎ 開啟即時定位";
+}
+
+function toggleLiveLocation() {
+    if (!navigator.geolocation) return alert("此裝置不支援定位功能。");
+    if (liveLocationWatchId !== null) {
+        stopLiveLocation();
+        showMessage("已關閉即時定位");
+        return;
+    }
+    document.getElementById("locateButton").textContent = "停止即時定位";
+    showMessage("正在開啟即時定位……");
+    let first = true;
+    liveLocationWatchId = navigator.geolocation.watchPosition(
+        position => { updateLiveLocationMarker(position, first); first = false; closeMobileSidebar(); },
+        error => { console.error(error); stopLiveLocation(); alert("無法取得即時位置，請允許定位權限並開啟手機定位服務。"); },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 1000 }
+    );
+}
+
 function openMobileSidebar() {
     sidebar.classList.add("mobile-open");
     screenOverlay.classList.remove("hidden");
@@ -2851,7 +2894,7 @@ document.getElementById(
     "locateButton"
 ).addEventListener(
     "click",
-    locateCurrentPosition
+    toggleLiveLocation
 );
 
 
@@ -3703,15 +3746,42 @@ function populateParcelSectionOptions(geoJson) {
 
 function populateParcelSectionCatalog(items) {
     if (parcelSectionsLoaded || !Array.isArray(items)) return;
-    const select = document.getElementById("parcelSectionSelect");
-    if (!select) return;
-    for (const item of [...items].sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"))) {
-        const option = document.createElement("option");
-        option.value = String(item.code).padStart(4, "0");
-        option.textContent = item.name;
-        select.appendChild(option);
-    }
-    parcelSectionsLoaded = select.options.length > 1;
+    parcelSectionCatalog = items.map(item => {
+        const match = String(item.name || "").match(/^(.+?區)(.+?段)(.*)$/);
+        return match ? {
+            code: String(item.code).padStart(4, "0"), name: item.name,
+            district: match[1], mainSection: match[2], subsection: match[3] || "不分小段"
+        } : null;
+    }).filter(Boolean);
+    const districtSelect = document.getElementById("parcelDistrictSelect");
+    const mainSelect = document.getElementById("parcelMainSectionSelect");
+    const subsectionSelect = document.getElementById("parcelSectionSelect");
+    const fill = (select, placeholder, values) => {
+        select.innerHTML = `<option value="">${placeholder}</option>`;
+        values.forEach(value => select.add(new Option(value, value)));
+    };
+    fill(districtSelect, "請選擇行政區", [...new Set(parcelSectionCatalog.map(item => item.district))].sort((a, b) => a.localeCompare(b, "zh-Hant")));
+    mainSelect.disabled = true;
+    subsectionSelect.disabled = true;
+    districtSelect.addEventListener("change", () => {
+        const values = [...new Set(parcelSectionCatalog.filter(item => item.district === districtSelect.value).map(item => item.mainSection))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
+        fill(mainSelect, "請選擇段", values);
+        fill(subsectionSelect, "請選擇小段", []);
+        mainSelect.disabled = !districtSelect.value;
+        subsectionSelect.disabled = true;
+    });
+    mainSelect.addEventListener("change", () => {
+        subsectionSelect.innerHTML = '<option value="">請選擇小段</option>';
+        parcelSectionCatalog.filter(item => item.district === districtSelect.value && item.mainSection === mainSelect.value)
+            .sort((a, b) => a.subsection.localeCompare(b.subsection, "zh-Hant"))
+            .forEach(item => {
+                const option = new Option(item.subsection, item.code);
+                option.dataset.fullName = item.name;
+                subsectionSelect.add(option);
+            });
+        subsectionSelect.disabled = !mainSelect.value;
+    });
+    parcelSectionsLoaded = parcelSectionCatalog.length > 0;
 }
 
 function normalizeParcelNumber(value) {
@@ -3744,7 +3814,7 @@ async function loadAndSearchParcels() {
             if (error) throw error;
             const geoJson = JSON.parse(await data.text());
             const selectedOption = document.getElementById("parcelSectionSelect").selectedOptions[0];
-            const correctSectionName = selectedOption?.textContent?.trim() || "地籍";
+            const correctSectionName = selectedOption?.dataset.fullName || selectedOption?.textContent?.trim() || "地籍";
             for (const feature of geoJson.features ?? []) {
                 feature.properties ??= {};
                 feature.properties.sectionName = correctSectionName;
