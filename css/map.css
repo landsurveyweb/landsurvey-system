@@ -920,6 +920,8 @@ button {
 }
 
 /* 地址搜尋結果的定位圖釘 */
+.live-location-marker { box-shadow:0 0 0 6px rgba(37,99,235,.2); animation:live-location-pulse 1.8s ease-out infinite; }
+@keyframes live-location-pulse { 0% { box-shadow:0 0 0 0 rgba(37,99,235,.45); } 100% { box-shadow:0 0 0 14px rgba(37,99,235,0); } }
 .address-pin-container {
     background: transparent;
     border: 0;
