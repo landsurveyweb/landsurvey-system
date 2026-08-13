@@ -157,27 +157,8 @@
                 
 
                 <section class="sidebar-section">
-                    <h2 class="section-title">
-                        匯入點位
-                    </h2>
-
-                    <button
-                        id="importPlaceholderButton"
-                        class="action-button"
-                        type="button"
-                    >
-                        ⇧ 匯入 .ct2
-                    </button>
-
-                    <div class="help-text">
-                        Q 開頭歸類為補點，其餘歸類為圖根點。
-                    </div>
-                </section>
-
-                <section class="sidebar-section">
-                    <h2 class="section-title">
-                        圖層
-                    </h2>
+                    <details>
+                    <summary class="section-title" style="cursor:pointer;">圖層</summary>
 
                     <label class="layer-row">
                         <input
@@ -267,6 +248,7 @@
                         <span>⭐</span>
                         <span>備註點位</span>
                     </label>
+                    </details>
                 </section>
 
                 <section class="sidebar-section">
@@ -287,6 +269,12 @@
                         </div>
                         <div id="traverseRouteList" class="traverse-route-list">正在載入導線……</div>
                     </details>
+                </section>
+
+                <section class="sidebar-section">
+                    <h2 class="section-title">匯入點位</h2>
+                    <button id="importPlaceholderButton" class="action-button" type="button">⇧ 匯入 .ct2</button>
+                    <div class="help-text">Q 開頭歸類為補點，其餘歸類為圖根點。</div>
                 </section>
 
                 <section class="sidebar-section">
