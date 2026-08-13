@@ -18,7 +18,7 @@
 
     <link
         rel="stylesheet"
-        href="./css/map.css?v=202608121000"
+        href="./css/map.css?v=202608131000"
     />
 </head>
 
@@ -107,9 +107,13 @@
 
                 <section class="sidebar-section">
                     <h2 class="section-title">地籍查詢</h2>
-                    <label class="field-label" for="parcelSectionSelect">地籍段</label>
+                    <label class="field-label" for="parcelDistrictSelect">行政區</label>
+                    <select id="parcelDistrictSelect" class="text-input"><option value="">請選擇行政區</option></select>
+                    <label class="field-label" for="parcelMainSectionSelect">段</label>
+                    <select id="parcelMainSectionSelect" class="text-input" disabled><option value="">請選擇段</option></select>
+                    <label class="field-label" for="parcelSectionSelect">小段</label>
                     <select id="parcelSectionSelect" class="text-input">
-                        <option value="">請選擇地籍段</option>
+                        <option value="">請選擇小段</option>
                     </select>
                     <label class="field-label" for="parcelNumberInput">地號</label>
                     <input id="parcelNumberInput" class="text-input" type="text"
@@ -291,7 +295,7 @@
                         class="action-button"
                         type="button"
                     >
-                        ◎ 定位目前位置
+                        ◎ 開啟即時定位
                     </button>
                 </section>
 
@@ -816,7 +820,7 @@
 
     <script src="./js/parcel-sections.js?v=202608101200"></script>
 
-    <script type="module" src="./js/bootstrap.js?v=202608121000"></script>
+    <script type="module" src="./js/bootstrap.js?v=202608131000"></script>
     
 </body>
 </html>
