@@ -131,6 +131,42 @@ async function parseCt2(file) {
     return { totalCount, validCount, skippedCount, importedCount: 0, items };
 }
 
+async function parseB90(file) {
+    if (!file) throw new Error("請選擇要匯入的 .b90 檔案。");
+    if (!file.name.toLowerCase().endsWith(".b90")) throw new Error("請選擇 .b90 檔案。");
+    if (file.size > 10 * 1024 * 1024) throw new Error("檔案不可超過 10 MB。");
+    const text = await file.text();
+    const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+    const points = new Map();
+    const routes = [];
+    let current = null;
+    const addPoint = (pointName, y, x, role, lineNumber) => {
+        const item = { lineNumber, pointName, x: round3(x), y: round3(y), pointType: role === "forward" ? "supplement" : (pointName.toUpperCase().startsWith("Q") ? "supplement" : "control"), status: "valid", message: "格式正確" };
+        if (!points.has(pointName)) points.set(pointName, item);
+        return item;
+    };
+    lines.forEach((raw, index) => {
+        const line = raw.trim();
+        let match = line.match(/^測\s*站:\s*(\S+)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/);
+        if (match) {
+            if (current?.station && current?.target && current.measured.length) routes.push(current);
+            current = { station: addPoint(match[1], match[2], match[3], "station", index + 1), target: null, measured: [] };
+            return;
+        }
+        match = line.match(/^標\s*定\s*點:\s*(\S+)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/);
+        if (match && current) {
+            current.target = addPoint(match[1], match[2], match[3], "backsight", index + 1);
+            return;
+        }
+        match = line.match(/^施\s*測\s*點:\s*(\S+)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/);
+        if (match && current) current.measured.push(addPoint(match[1], match[2], match[3], "forward", index + 1));
+    });
+    if (current?.station && current?.target && current.measured.length) routes.push(current);
+    const items = [...points.values()];
+    if (!items.length || !routes.length) throw new Error("找不到完整的測站、標定點及施測點資料。");
+    return { totalCount: items.length, validCount: items.length, skippedCount: 0, importedCount: 0, items, routes };
+}
+
 async function duplicateWarnings(supabase, pointName, x, y, excludedId = null) {
     const { data, error } = await supabase.from("survey_points").select("id,point_name,section_name,x,y");
     if (error) throw error;
@@ -272,37 +308,59 @@ export function installApiAdapter(supabase, user) {
             }
 
             if (url.pathname === "/api/import/ct2/preview" && method === "POST") {
-                return jsonResponse(await parseCt2(init.body?.get("file")));
+                const file = init.body?.get("file");
+                return jsonResponse(file?.name.toLowerCase().endsWith(".b90") ? await parseB90(file) : await parseCt2(file));
             }
 
             if (url.pathname === "/api/import/ct2/import" && method === "POST") {
                 const file = init.body?.get("file");
-                const result = await parseCt2(file);
+                const isB90 = file?.name.toLowerCase().endsWith(".b90");
+                const result = isB90 ? await parseB90(file) : await parseCt2(file);
+                const pointIds = new Map();
                 for (const item of result.items.filter(item => item.status === "valid")) {
                     const warnings = await duplicateWarnings(supabase, item.pointName, item.x, item.y);
                     if (warnings.length) {
                         item.status = "duplicate";
-                        item.message = "發現可能重複的點位，已略過。";
+                        item.message = "已有相同點位，將沿用既有資料。";
+                        pointIds.set(item.pointName, warnings[0].id);
                         result.skippedCount++;
                         continue;
                     }
                     const { longitude, latitude } = coordinates(item.x, item.y);
                     const sectionName = await findSectionName(longitude, latitude);
-                    const { error } = await supabase.from("survey_points").insert({
+                    const { data: inserted, error } = await supabase.from("survey_points").insert({
                         point_name: item.pointName, point_type: item.pointType, status: "active",
                         x: item.x, y: item.y, longitude, latitude, section_name: sectionName,
                         remark: `由 ${file.name} 匯入`, created_by: user.id, updated_by: user.id,
                         import_source: file.name
-                    });
+                    }).select("id").single();
                     if (error) {
                         item.status = "error";
                         item.message = error.message;
                         result.skippedCount++;
                     } else {
+                        pointIds.set(item.pointName, inserted.id);
                         item.status = "imported";
                         item.message = "匯入成功";
                         result.importedCount++;
                     }
+                }
+                if (isB90) {
+                    result.routeCount = 0;
+                    for (const [routeIndex, source] of result.routes.entries()) {
+                        const ordered = [source.target, source.station, ...source.measured];
+                        if (ordered.some(item => !pointIds.has(item.pointName))) continue;
+                        const routeName = `${file.name.replace(/\.b90$/i, "")}－${source.station.pointName}`;
+                        const { data: route, error: routeError } = await supabase.from("traverse_routes")
+                            .insert({ name: routeName, color: ["#2563eb", "#dc2626", "#16a34a", "#9333ea"][routeIndex % 4] })
+                            .select("id").single();
+                        if (routeError) throw routeError;
+                        const rows = ordered.map((item, sequence) => ({ route_id: route.id, point_id: pointIds.get(item.pointName), sequence, role: sequence === 0 ? "backsight" : sequence === 1 ? "station" : "forward" }));
+                        const { error: routePointsError } = await supabase.from("traverse_route_points").insert(rows);
+                        if (routePointsError) throw routePointsError;
+                        result.routeCount++;
+                    }
+                    delete result.routes;
                 }
                 return jsonResponse(result);
             }

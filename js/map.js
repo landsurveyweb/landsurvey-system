@@ -762,6 +762,12 @@ window.showPointHistory =
 
     </div>
 `);
+    marker.bindTooltip(escapeHtml(point.pointName), {
+        permanent: true,
+        direction: "right",
+        offset: [9, 0],
+        className: "point-name-label"
+    });
 
     marker.addTo(getTargetLayer(point));
     marker.on("click", () => {
@@ -1732,6 +1738,9 @@ async function previewCt2File(file) {
 
     importFileName.textContent =
         `檔案：${file.name}`;
+    const isB90 = file.name.toLowerCase().endsWith(".b90");
+    const title = document.getElementById("importDialogTitle");
+    if (title) title.textContent = isB90 ? "匯入 .b90 點位並建立導線" : "匯入 .ct2 點位";
 
     importSummary.textContent =
         "正在解析檔案……";
@@ -1819,10 +1828,7 @@ async function previewCt2File(file) {
             </tr>
         `;
 
-        alert(
-            error.message
-            ?? "無法解析 .ct2 檔案"
-        );
+        alert(error.message ?? "無法解析點位檔案");
     }
 }
 
@@ -1939,7 +1945,7 @@ function renderCt2Preview(result) {
 
 async function importCt2Points() {
     if (!currentCt2File) {
-        alert("請重新選擇 .ct2 檔案。");
+        alert("請重新選擇點位檔案。");
         return;
     }
 
@@ -2018,7 +2024,7 @@ async function importCt2Points() {
         showMessage(
             `成功匯入 ${
                 Number(result.importedCount ?? 0)
-            } 筆點位`
+            } 筆點位${result.routeCount ? `，建立 ${result.routeCount} 條導線` : ""}`
         );
     } catch (error) {
         console.error(error);
@@ -2836,6 +2842,7 @@ document.getElementById(
     "importPlaceholderButton"
 ).addEventListener("click", () => {
     ct2FileInput.value = "";
+    ct2FileInput.accept = ".ct2";
     ct2FileInput.click();
 });
 
@@ -2896,6 +2903,12 @@ document.getElementById(
     "click",
     toggleLiveLocation
 );
+
+document.getElementById("importB90Button")?.addEventListener("click", () => {
+    ct2FileInput.value = "";
+    ct2FileInput.accept = ".b90";
+    ct2FileInput.click();
+});
 
 
 function selectStreetBaseMap() {
@@ -3019,6 +3032,12 @@ document.getElementById("traverseLayerToggle")?.addEventListener("change", event
     }
 });
 
+function updatePointNameLabelVisibility() {
+    map.getContainer().classList.toggle("show-point-names", map.getZoom() >= 17);
+}
+map.on("zoomend", updatePointNameLabelVisibility);
+updatePointNameLabelVisibility();
+
 document.getElementById("startTraverseButton")?.addEventListener("click", startTraverseCreation);
 document.getElementById("cancelTraverseButton")?.addEventListener("click", cancelTraverseCreation);
 document.getElementById("saveTraverseButton")?.addEventListener("click", saveTraverseRoute);
@@ -3033,12 +3052,8 @@ ct2FileInput.addEventListener(
             return;
         }
 
-        if (
-            !file.name
-                .toLowerCase()
-                .endsWith(".ct2")
-        ) {
-            alert("請選擇 .ct2 檔案。");
+        if (!/\.(ct2|b90)$/i.test(file.name)) {
+            alert("請選擇 .ct2 或 .b90 檔案。");
             ct2FileInput.value = "";
             return;
         }
