@@ -2586,7 +2586,6 @@ function updateLiveLocationMarker(position, centerMap = false) {
         liveLocationAccuracyCircle?.setRadius(position.coords.accuracy || 0);
     }
     if (centerMap) map.setView(latLng, Math.max(map.getZoom(), 18));
-    else map.panTo(latLng, { animate: true, duration: 0.5 });
 }
 
 function stopLiveLocation() {
