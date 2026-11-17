@@ -203,6 +203,13 @@ let currentCt2File = null;
 let currentCt2Preview = null;
 
 let allPoints = [];
+let currentPointScope = { type: "none" };
+let pointLoadVersion = 0;
+let pointSearchVersion = 0;
+let parcelSearchVersion = 0;
+let traverseLoadVersion = 0;
+const traversePointById = new Map();
+const findLoadedPoint = id => allPoints.find(point => point.id === id) || traversePointById.get(id);
 let markerByPointId = new Map();
 let allTraverseRoutes = [];
 let traverseBuildState = null;
@@ -397,10 +404,10 @@ function getPointTraverseInfoHtml(pointId) {
             const previousItem = index > 0 ? route.points[index - 1] : null;
             const nextItem = index < route.points.length - 1 ? route.points[index + 1] : null;
             const previousPoint = previousItem
-                ? allPoints.find(point => point.id === previousItem.pointId)
+                ? findLoadedPoint(previousItem.pointId)
                 : null;
             const nextPoint = nextItem
-                ? allPoints.find(point => point.id === nextItem.pointId)
+                ? findLoadedPoint(nextItem.pointId)
                 : null;
             return { route, previousPoint, nextPoint };
         })
@@ -763,7 +770,9 @@ window.showPointHistory =
     </div>
 `);
     marker.bindTooltip(escapeHtml(point.pointName), {
-        permanent: true,
+        // Thousands of permanent HTML labels defeat the canvas marker renderer.
+        // Show names on hover; tapping a marker still opens its named popup.
+        permanent: false,
         direction: "right",
         offset: [9, 0],
         className: "point-name-label"
@@ -813,13 +822,13 @@ function clearDisplayedTraverses() {
 
 function drawTraverseRoute(route, displayColor) {
     const points = route.points
-        .map(item => allPoints.find(point => point.id === item.pointId))
-        .filter(Boolean);
+        .map(item => findLoadedPoint(item.pointId));
     if (points.length < 2) return;
 
     for (let index = 1; index < points.length; index += 1) {
         const from = points[index - 1];
         const to = points[index];
+        if (!from || !to) continue;
 
         // 後視圖根點到設站圖根點固定使用實線。
         if (index === 1) {
@@ -951,7 +960,7 @@ window.editTraverseRoute = function (routeId) {
         routeId: route.id,
         originalPointCount: route.points.length,
         points: route.points.map(item => {
-            const point = allPoints.find(candidate => candidate.id === item.pointId);
+            const point = findLoadedPoint(item.pointId);
             return {
                 pointId: item.pointId,
                 pointName: point?.pointName || "已刪除點位",
@@ -1077,7 +1086,7 @@ function renderTraverseRouteList() {
     }
     panel.innerHTML = allTraverseRoutes.map(route => {
         const names = route.points.map(item =>
-            allPoints.find(point => point.id === item.pointId)?.pointName || "已刪除點位"
+            findLoadedPoint(item.pointId)?.pointName || "已刪除點位"
         ).join(" → ");
         return `<div class="traverse-route-item">
             <div class="traverse-route-heading"><span class="traverse-route-swatch" style="background:${route.color}"></span>${escapeHtml(route.name)}</div>
@@ -1092,88 +1101,150 @@ function renderTraverseRouteList() {
 }
 
 async function loadTraverses() {
-    try {
-        const { data, error } = await window.landSurveySupabase
-            .from("traverse_routes")
-            .select("id,name,color,created_by,traverse_route_points(point_id,sequence,role)")
-            .order("id");
-        if (error) throw error;
-        allTraverseRoutes = (data || []).map(route => ({
-            id: route.id,
-            name: route.name,
-            color: route.color,
-            createdBy: route.created_by,
-            points: (route.traverse_route_points || [])
-                .sort((a, b) => a.sequence - b.sequence)
-                .map(item => ({ pointId: item.point_id, sequence: item.sequence, role: item.role }))
-        }));
+    const version = ++traverseLoadVersion;
+    const scopeVersion = pointLoadVersion;
+    const visibleIds = allPoints.map(point => point.id);
+    if (!visibleIds.length) {
+        allTraverseRoutes = [];
+        traversePointById.clear();
+        clearDisplayedTraverses();
         renderTraverseRouteList();
+        return;
+    }
+    try {
+        const client = window.landSurveySupabase;
+        const routeIds = new Set();
+        // Filter route membership at the database, with pagination in each small ID batch.
+        for (let offset = 0; offset < visibleIds.length; offset += 100) {
+            const batch = visibleIds.slice(offset, offset + 100);
+            for (let page = 0; ; page += 500) {
+                const { data, error } = await client.from("traverse_route_points")
+                    .select("route_id,point_id").in("point_id", batch)
+                    .order("route_id").order("point_id").range(page, page + 499);
+                if (error) throw error;
+                data.forEach(row => routeIds.add(row.route_id));
+                if (data.length < 500) break;
+            }
+        }
+        const routes = [];
+        const ids = [...routeIds];
+        for (let offset = 0; offset < ids.length; offset += 100) {
+            const { data, error } = await client.from("traverse_routes")
+                .select("id,name,color,created_by").in("id", ids.slice(offset, offset + 100)).order("id");
+            if (error) throw error;
+            routes.push(...data.map(row => ({ id: row.id, name: row.name, color: row.color,
+                createdBy: row.created_by, points: [] })));
+        }
+        const routeById = new Map(routes.map(route => [route.id, route]));
+        for (let offset = 0; offset < ids.length; offset += 100) {
+            for (let page = 0; ; page += 500) {
+                const { data, error } = await client.from("traverse_route_points")
+                    .select("route_id,point_id,sequence,role").in("route_id", ids.slice(offset, offset + 100))
+                    .order("route_id").order("sequence").range(page, page + 499);
+                if (error) throw error;
+                data.forEach(row => routeById.get(row.route_id)?.points.push({
+                    pointId: row.point_id, sequence: row.sequence, role: row.role }));
+                if (data.length < 500) break;
+            }
+        }
+        const related = new Map(allPoints.map(point => [point.id, point]));
+        const missing = [...new Set(routes.flatMap(route => route.points.map(item => item.pointId)))]
+            .filter(id => !related.has(id));
+        for (let offset = 0; offset < missing.length; offset += 100) {
+            const { data, error } = await client.from("survey_points")
+                .select("id,point_name,latitude,longitude").in("id", missing.slice(offset, offset + 100));
+            if (error) throw error;
+            data.forEach(row => related.set(row.id, { id: row.id, pointName: row.point_name,
+                latitude: Number(row.latitude), longitude: Number(row.longitude) }));
+        }
+        if (version !== traverseLoadVersion || scopeVersion !== pointLoadVersion) return;
+        allTraverseRoutes = routes;
+        traversePointById.clear();
+        related.forEach((point, id) => traversePointById.set(id, point));
+        renderTraverseRouteList();
+        allPoints.forEach(point => updatePointTraversePopup(point.id));
         if (activeTraversePointId) showTraversesForSupplement(activeTraversePointId);
     } catch (error) {
+        if (version !== traverseLoadVersion || scopeVersion !== pointLoadVersion) return;
         console.error(error);
-        const panel = document.getElementById("traverseRouteList");
-        if (panel) panel.textContent = "導線載入失敗。";
+        document.getElementById("traverseRouteList").textContent = "導線載入失敗。";
     }
 }
 
 window.loadTraverses = loadTraverses;
 
-async function loadPoints() {
+function clearPointDisplay() {
+    allPoints = [];
+    controlPointLayer.clearLayers();
+    supplementPointLayer.clearLayers();
+    missingPointLayer.clearLayers();
+    markerByPointId.clear();
+    clearDisplayedTraverses();
+    allTraverseRoutes = [];
+    traversePointById.clear();
+    renderPointList();
+    renderTraverseRouteList();
+}
+
+async function selectPointScope(scope, fitBounds = false) {
+    currentPointScope = scope;
+    ++pointSearchVersion;
+    clearPointDisplay();
+    return loadPoints({ fitBounds });
+}
+
+async function loadPoints({ fitBounds = false } = {}) {
+    const version = ++pointLoadVersion;
+    const scope = currentPointScope;
+    if (scope.type === "none") {
+        clearPointDisplay();
+        return true;
+    }
+    const panel = document.getElementById("pointListPanel");
+    panel.textContent = "正在載入點位……";
     try {
-        const response =
-            await fetch("/api/points");
-
-        if (!response.ok) {
-            throw new Error(
-                `HTTP ${response.status}`
-            );
+        const endpoint = scope.type === "point"
+            ? "/api/points/" + scope.id
+            : "/api/points?district=" + encodeURIComponent(scope.district);
+        const response = await fetch(endpoint);
+        if (scope.type === "point" && response.status === 404) {
+            if (version !== pointLoadVersion) return false;
+            clearPointDisplay();
+            panel.textContent = "此點位已刪除或目前無法讀取。";
+            return false;
         }
-
-        allPoints =
-            await response.json();
-
-        controlPointLayer.clearLayers();
-        supplementPointLayer.clearLayers();
-        missingPointLayer.clearLayers();
-        markerByPointId.clear();
-
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const result = await response.json();
+        if (version !== pointLoadVersion) return false;
+        clearPointDisplay();
+        allPoints = scope.type === "point" ? [result] : result;
         allPoints.forEach(createPointMarker);
-
         renderPointList();
-        await loadTraverses();
-
-        if (allPoints.length > 0) {
-            const bounds = L.latLngBounds(
-                allPoints.map(point => [
-                    point.latitude,
-                    point.longitude
-                ])
-            );
-
-            map.fitBounds(bounds, {
-                padding: [35, 35],
-                maxZoom: 18
-            });
+        if (fitBounds && allPoints.length) {
+            map.fitBounds(L.latLngBounds(allPoints.map(point => [point.latitude, point.longitude])),
+                { padding: [35, 35], maxZoom: 18 });
         }
+        await loadTraverses();
+        return version === pointLoadVersion;
     } catch (error) {
+        if (version !== pointLoadVersion) return false;
         console.error(error);
-
-        document.getElementById(
-            "pointListPanel"
-        ).textContent = "點位載入失敗";
-
-        showMessage(
-            "無法載入正式點位，請確認網站與資料庫連線。"
-        );
+        panel.textContent = "點位載入失敗，請重新搜尋。";
+        showMessage("無法載入正式點位，請確認網站與資料庫連線。");
+        return false;
     }
 }
+
+window.loadPoints = loadPoints;
 
 function renderPointList() {
     const panel =
         document.getElementById("pointListPanel");
 
     if (allPoints.length === 0) {
-        panel.textContent = "目前沒有正式點位";
+        panel.textContent = currentPointScope.type === "none"
+            ? "請搜尋點名，或搜尋地號以載入該行政區點位。"
+            : "目前查詢範圍沒有正式點位。";
         return;
     }
 
@@ -1211,6 +1282,11 @@ function renderPointList() {
 
         pointList.className = "section-point-list";
 
+        pointList.classList.add("hidden");
+        let populated = false;
+        const populate = () => {
+        if (populated) return;
+        populated = true;
         for (const point of points) {
             const button =
                 document.createElement("button");
@@ -1240,8 +1316,10 @@ function renderPointList() {
 
             pointList.appendChild(button);
         }
+        };
 
         title.addEventListener("click", () => {
+            populate();
             pointList.classList.toggle("hidden");
         });
 
@@ -1267,63 +1345,62 @@ function locatePoint(point) {
     closeMobileSidebar();
 }
 
-function searchPoints() {
-    const keyword =
-        document.getElementById(
-            "pointSearchInput"
-        ).value.trim().toLowerCase();
-
-    const resultPanel =
-        document.getElementById(
-            "searchResultPanel"
-        );
-
+async function searchPoints() {
+    const keyword = document.getElementById("pointSearchInput").value.trim();
+    const panel = document.getElementById("searchResultPanel");
+    const version = ++pointSearchVersion;
+    ++parcelSearchVersion;
     if (!keyword) {
-        resultPanel.classList.add("hidden");
+        panel.classList.add("hidden");
         return;
     }
-
-    const matches = allPoints
-        .filter(point =>
-            point.pointName
-                .toLowerCase()
-                .includes(keyword)
-        )
-        .slice(0, 20);
-
-    resultPanel.innerHTML = "";
-
-    if (matches.length === 0) {
-        resultPanel.textContent =
-            "找不到符合的點位";
-
-        resultPanel.classList.remove("hidden");
-        return;
-    }
-
-    for (const point of matches) {
-        const button =
-            document.createElement("button");
-
-        button.type = "button";
-        button.className =
-            "search-result-button";
-
-        button.textContent =
-            `${point.pointName}－${point.sectionName || "未判定"}`;
-
-        button.addEventListener(
-            "click",
-            () => {
-                locatePoint(point);
-                resultPanel.classList.add("hidden");
+    // Switch away from the previous district before starting the point search.
+    currentPointScope = { type: "none" };
+    ++pointLoadVersion;
+    clearPointDisplay();
+    panel.classList.remove("hidden");
+    panel.textContent = "正在搜尋點位……";
+    try {
+        const response = await fetch("/api/points?q=" + encodeURIComponent(keyword));
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const matches = await response.json();
+        if (version !== pointSearchVersion) return;
+        panel.innerHTML = "";
+        if (!matches.length) {
+            panel.textContent = "找不到符合的點位。";
+            return;
+        }
+        const choose = async point => {
+            ++parcelSearchVersion;
+            panel.classList.add("hidden");
+            const loaded = await selectPointScope({ type: "point", id: point.id }, true);
+            if (loaded) {
+                const selected = allPoints.find(item => item.id === point.id);
+                if (selected) locatePoint(selected);
             }
-        );
-
-        resultPanel.appendChild(button);
+        };
+        if (matches.length === 1) {
+            await choose(matches[0]);
+            return;
+        }
+        const hint = document.createElement("div");
+        hint.textContent = matches.length > 20
+            ? "符合超過 20 筆，請縮小點名範圍；或點選下列結果。"
+            : "請選擇要顯示的點位。";
+        panel.appendChild(hint);
+        for (const point of matches.slice(0, 20)) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "search-result-button";
+            button.textContent = point.pointName + "－" + (point.sectionName || "未判定") + "（X " + point.x + "，Y " + point.y + "）";
+            button.addEventListener("click", () => choose(point));
+            panel.appendChild(button);
+        }
+    } catch (error) {
+        if (version !== pointSearchVersion) return;
+        console.error(error);
+        panel.textContent = "搜尋失敗，請稍後重試。";
     }
-
-    resultPanel.classList.remove("hidden");
 }
 
 let addressLocationMarker = null;
@@ -1693,9 +1770,10 @@ async function savePoint() {
 
         pointDialog.close();
 
-        showMessage(isEdit ? `已更新 ${pointName}` : `已新增 ${pointName}`);
+        showMessage(isEdit ? "已更新 " + pointName : "已新增 " + pointName);
 
-        await loadPoints();
+        if (!isEdit) await selectPointScope({ type: "point", id: result.id }, true);
+        else await loadPoints();
     } catch (error) {
         console.error(error);
 
@@ -3807,7 +3885,17 @@ function normalizeParcelNumber(value) {
     return match[1].padStart(4, "0") + (match[2] || "0").padStart(4, "0");
 }
 
+for (const id of ["parcelDistrictSelect", "parcelMainSectionSelect", "parcelSectionSelect", "parcelNumberInput"]) {
+    document.getElementById(id)?.addEventListener(id === "parcelNumberInput" ? "input" : "change", () => {
+        ++parcelSearchVersion;
+    });
+}
+
 async function loadAndSearchParcels() {
+    const version = ++parcelSearchVersion;
+    ++pointSearchVersion;
+    document.getElementById("searchResultPanel").classList.add("hidden");
+    const district = document.getElementById("parcelDistrictSelect").value;
     const sectionCode = document.getElementById("parcelSectionSelect").value;
     const input = document.getElementById("parcelNumberInput").value;
     const status = document.getElementById("parcelStatus");
@@ -3827,6 +3915,7 @@ async function loadAndSearchParcels() {
                 .from("cadastral-data").download(`${sectionCode}.geojson`);
             if (error) throw error;
             const geoJson = JSON.parse(await data.text());
+            if (version !== parcelSearchVersion) return;
             const selectedOption = document.getElementById("parcelSectionSelect").selectedOptions[0];
             const correctSectionName = selectedOption?.dataset.fullName || selectedOption?.textContent?.trim() || "地籍";
             for (const feature of geoJson.features ?? []) {
@@ -3849,19 +3938,28 @@ async function loadAndSearchParcels() {
                 status.textContent = "此地籍段找不到該地號。";
                 return;
             }
+            const loaded = await selectPointScope({ type: "district", district });
+            if (version !== parcelSearchVersion) return;
             found.setStyle?.({ color: "#dc2626", weight: 3, fillOpacity: 0.22 });
             map.fitBounds(found.getBounds(), { maxZoom: 20, padding: [24, 24] });
             found.openPopup();
-            status.textContent = "已定位地號。";
+            status.textContent = loaded
+                ? "已定位地號；已載入" + district + " " + allPoints.length.toLocaleString() + " 筆點位。"
+                : "已定位地號；點位載入失敗，請重新搜尋。";
         } else {
+            const loaded = await selectPointScope({ type: "district", district });
+            if (version !== parcelSearchVersion) return;
             map.fitBounds(parcelLayer.getBounds(), { padding: [20, 20] });
-            status.textContent = `已載入本段 ${parcelLayer.getLayers().length.toLocaleString()} 筆地籍，可直接點選查看。`;
+            status.textContent = loaded
+                ? "已載入本段 " + parcelLayer.getLayers().length.toLocaleString() + " 筆地籍；" + district + " " + allPoints.length.toLocaleString() + " 筆點位。"
+                : "已載入地籍；點位載入失敗，請重新搜尋。";
         }
         closeMobileSidebar();
     } catch (error) {
         console.error(error);
         const detail = error?.message ? `（${error.message}）` : "";
-        status.textContent = `地籍資料載入失敗${detail}`;
+        if (version !== parcelSearchVersion) return;
+        status.textContent = "地籍資料載入失敗" + detail;
     }
 }
 

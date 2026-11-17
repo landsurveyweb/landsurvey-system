@@ -1,6 +1,6 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
-import { installApiAdapter } from "./supabase-api.js?v=20261117-1";
+import { installApiAdapter } from "./supabase-api.js?v=20261117-scope1";
 
 if (SUPABASE_URL.includes("YOUR_PROJECT") || SUPABASE_ANON_KEY.includes("YOUR_SUPABASE")) {
     document.body.innerHTML = `<main style="max-width:720px;margin:8vh auto;padding:24px;font-family:system-ui;line-height:1.7">
@@ -45,7 +45,7 @@ installApiAdapter(supabase, session.user);
 
 await new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "./js/map.js?v=202608191145";
+    script.src = "./js/map.js?v=20261117-scope1";
     script.onload = resolve;
     script.onerror = reject;
     document.body.appendChild(script);
@@ -57,7 +57,7 @@ const refreshSharedData = () => {
     window.__landSurveyRefreshTimer = window.setTimeout(() => {
         window.loadPoints?.();
         window.loadNotes?.();
-        window.loadTraverses?.();
+        // loadPoints refreshes routes for the active scope.
     }, 200);
 };
 

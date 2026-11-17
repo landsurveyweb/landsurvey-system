@@ -167,7 +167,7 @@ async function parseB90(file) {
     return { totalCount: items.length, validCount: items.length, skippedCount: 0, importedCount: 0, items, routes };
 }
 
-async function fetchAllSurveyPoints(supabase, columns = "*") {
+async function fetchAllSurveyPoints(supabase, columns = "*", filter = query => query) {
     const pageSize = 500;
     const rows = [];
     let lastId = null;
@@ -179,6 +179,7 @@ async function fetchAllSurveyPoints(supabase, columns = "*") {
             .order("id", { ascending: true })
             .limit(pageSize);
 
+        query = filter(query);
         if (lastId !== null) {
             query = query.gt("id", lastId);
         }
@@ -195,10 +196,15 @@ async function fetchAllSurveyPoints(supabase, columns = "*") {
 }
 
 async function duplicateWarnings(supabase, pointName, x, y, excludedId = null) {
-    const data = await fetchAllSurveyPoints(
-    supabase,
-    "id,point_name,section_name,x,y"
-);
+    // Query duplicate candidates across the whole database, independently of map scope.
+    const columns = "id,point_name,section_name,x,y";
+    const [sameNames, nearby] = await Promise.all([
+        fetchAllSurveyPoints(supabase, columns, query => query.eq("point_name", pointName)),
+        fetchAllSurveyPoints(supabase, columns, query => query
+            .gte("x", x - 1).lte("x", x + 1)
+            .gte("y", y - 1).lte("y", y + 1))
+    ]);
+    const data = [...new Map([...sameNames, ...nearby].map(row => [row.id, row])).values()];
     return data.filter(row => row.id !== excludedId).map(row => {
         const distance = Math.hypot(Number(row.x) - x, Number(row.y) - y);
         const sameName = row.point_name === pointName;
@@ -244,13 +250,25 @@ export function installApiAdapter(supabase, user) {
 
         try {
             if (url.pathname === "/api/points" && method === "GET") {
-                const data = await fetchAllSurveyPoints(supabase);
-                const points = await Promise.all(data.map(async row => {
-                    const point = pointFromRow(row);
-                    if (!point.sectionName) point.sectionName = await findSectionName(point.longitude, point.latitude);
-                    return point;
-                }));
-                return jsonResponse(points);
+                const keyword = (url.searchParams.get("q") || "").trim();
+                const district = (url.searchParams.get("district") || "").trim();
+                let data;
+                if (keyword) {
+                    // Escape SQL LIKE wildcards so a point name is treated as literal text.
+                    const pattern = keyword.replace(/[\\%_]/g, "\\$&");
+                    const result = await supabase.from("survey_points").select("*")
+                        .ilike("point_name", "%" + pattern + "%").order("point_name").order("id").limit(21);
+                    if (result.error) throw result.error;
+                    data = result.data;
+                } else if (district) {
+                    if (!/^[\u3400-\u9fff]{1,20}區$/.test(district)) throw new Error("行政區格式不正確。");
+                    data = await fetchAllSurveyPoints(supabase, "*",
+                        query => query.like("section_name", district + "%"));
+                } else {
+                    // No unfiltered map reads, including startup and realtime refreshes.
+                    return jsonResponse([]);
+                }
+                return jsonResponse(data.map(pointFromRow));
             }
 
             if (url.pathname === "/api/points" && method === "POST") {
@@ -275,8 +293,9 @@ export function installApiAdapter(supabase, user) {
             if (pointMatch) {
                 const id = Number(pointMatch[1]);
                 if (method === "GET") {
-                    const { data, error } = await supabase.from("survey_points").select("*").eq("id", id).single();
+                    const { data, error } = await supabase.from("survey_points").select("*").eq("id", id).maybeSingle();
                     if (error) throw error;
+                    if (!data) return jsonResponse({ message: "此點位已刪除或目前無法讀取。" }, 404);
                     return jsonResponse(pointFromRow(data));
                 }
                 if (method === "PUT") {
