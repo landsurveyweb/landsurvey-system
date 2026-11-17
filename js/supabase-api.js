@@ -467,6 +467,20 @@ export function installApiAdapter(supabase, user) {
                 return new Response(await response.text(), { headers: { "Content-Type": "application/geo+json; charset=utf-8" } });
             }
 
+            if (url.pathname === "/api/addresses/district" && method === "GET") {
+                const longitudeText = url.searchParams.get("longitude");
+                const latitudeText = url.searchParams.get("latitude");
+                const longitude = Number(longitudeText), latitude = Number(latitudeText);
+                if (!longitudeText || !latitudeText || !Number.isFinite(longitude) ||
+                    !Number.isFinite(latitude) || Math.abs(longitude) > 180 || Math.abs(latitude) > 90) {
+                    throw new Error("地址座標不正確。");
+                }
+                // Resolve against this project's section polygons, not ambiguous address text.
+                const sectionName = await findSectionName(longitude, latitude);
+                const districtName = sectionName?.match(/^(.+?區)/)?.[1] || null;
+                return jsonResponse({ districtName, sectionName });
+            }
+
             if (url.pathname === "/api/addresses/search" && method === "GET") {
                 const query = url.searchParams.get("q") || "";
                 const response = await nativeFetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=tw&limit=20&q=${encodeURIComponent(query)}`, {

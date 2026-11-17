@@ -207,6 +207,7 @@ let currentPointScope = { type: "none" };
 let pointLoadVersion = 0;
 let pointSearchVersion = 0;
 let parcelSearchVersion = 0;
+let addressLoadVersion = 0;
 let traverseLoadVersion = 0;
 const traversePointById = new Map();
 const findLoadedPoint = id => allPoints.find(point => point.id === id) || traversePointById.get(id);
@@ -1346,6 +1347,7 @@ function locatePoint(point) {
 }
 
 async function searchPoints() {
+    ++addressLoadVersion;
     const keyword = document.getElementById("pointSearchInput").value.trim();
     const panel = document.getElementById("searchResultPanel");
     const version = ++pointSearchVersion;
@@ -1480,7 +1482,7 @@ async function searchAddresses() {
     }
 }
 
-function locateAddress(address) {
+async function locateAddress(address) {
     const latitude =
         Number(address.latitude);
 
@@ -1492,6 +1494,12 @@ function locateAddress(address) {
         alert("這筆地址沒有有效座標。");
         return;
     }
+
+    const version = ++addressLoadVersion;
+    ++parcelSearchVersion;
+    await selectPointScope({ type: "none" });
+    if (version !== addressLoadVersion) return;
+    document.getElementById("searchResultPanel").classList.add("hidden");
 
     if (addressLocationMarker) {
         map.removeLayer(
@@ -1556,6 +1564,28 @@ function locateAddress(address) {
     ).classList.add("hidden");
 
     closeMobileSidebar();
+
+    showMessage("正在判定地址行政區並載入點位……");
+    try {
+        const response = await fetch("/api/addresses/district?longitude=" +
+            encodeURIComponent(longitude) + "&latitude=" + encodeURIComponent(latitude));
+        if (!response.ok) throw new Error("無法判定地址行政區。");
+        const result = await response.json();
+        if (version !== addressLoadVersion) return;
+        if (!result.districtName) {
+            showMessage("已定位地址；此地址不在目前地籍段界涵蓋範圍，未載入點位。");
+            return;
+        }
+        const loaded = await selectPointScope({ type: "district", district: result.districtName });
+        if (version !== addressLoadVersion) return;
+        showMessage(loaded
+            ? "已定位地址；已載入" + result.districtName + " " + allPoints.length.toLocaleString() + " 筆點位。"
+            : "已定位地址；點位載入失敗，請重新選取地址。");
+    } catch (error) {
+        if (version !== addressLoadVersion) return;
+        console.error(error);
+        showMessage("已定位地址；行政區點位載入失敗，請重新選取地址。");
+    }
 }
 
 async function loadSections() {
@@ -3892,6 +3922,7 @@ for (const id of ["parcelDistrictSelect", "parcelMainSectionSelect", "parcelSect
 }
 
 async function loadAndSearchParcels() {
+    ++addressLoadVersion;
     const version = ++parcelSearchVersion;
     ++pointSearchVersion;
     document.getElementById("searchResultPanel").classList.add("hidden");
@@ -3967,11 +3998,23 @@ document.getElementById("parcelSearchButton")?.addEventListener("click", loadAnd
 document.getElementById("parcelNumberInput")?.addEventListener("keydown", event => {
     if (event.key === "Enter") loadAndSearchParcels();
 });
-document.getElementById("parcelClearButton")?.addEventListener("click", () => {
+function clearParcelsAndPoints() {
+    ++parcelSearchVersion;
+    ++addressLoadVersion;
+    document.getElementById("searchResultPanel").classList.add("hidden");
+    document.getElementById("addressSearchResultPanel").classList.add("hidden");
     parcelLayer.clearLayers();
+    if (addressLocationMarker) {
+        map.removeLayer(addressLocationMarker);
+        addressLocationMarker = null;
+    }
     loadedParcelSectionCode = "";
-    document.getElementById("parcelStatus").textContent = "已清除地籍圖。";
-});
+    // Reset scope as well as layers, so pending queries and realtime cannot restore points.
+    selectPointScope({ type: "none" });
+    document.getElementById("parcelStatus").textContent = "已清除地籍圖、正式點位與導線。";
+}
+
+document.getElementById("parcelClearButton")?.addEventListener("click", clearParcelsAndPoints);
 
 populateParcelSectionCatalog(window.PARCEL_SECTIONS);
 loadSections();
