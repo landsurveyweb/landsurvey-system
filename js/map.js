@@ -1844,9 +1844,8 @@ async function previewCt2File(file) {
 
     importFileName.textContent =
         `檔案：${file.name}`;
-    const isB90 = file.name.toLowerCase().endsWith(".b90");
     const title = document.getElementById("importDialogTitle");
-    if (title) title.textContent = isB90 ? "匯入 .b90 與導線（測點限 Q 開頭）" : "匯入 .ct2 點位";
+    if (title) title.textContent = "匯入 .ct2 點位";
 
     importSummary.textContent =
         "正在解析檔案……";
@@ -2130,7 +2129,7 @@ async function importCt2Points() {
         showMessage(
             `成功匯入 ${
                 Number(result.importedCount ?? 0)
-            } 筆點位${result.routeCount ? `，建立 ${result.routeCount} 條導線` : ""}`
+            } 筆點位`
         );
     } catch (error) {
         console.error(error);
@@ -3009,11 +3008,7 @@ document.getElementById(
     toggleLiveLocation
 );
 
-document.getElementById("importB90Button")?.addEventListener("click", () => {
-    ct2FileInput.value = "";
-    ct2FileInput.accept = ".b90";
-    ct2FileInput.click();
-});
+
 
 
 function selectStreetBaseMap() {
@@ -3157,8 +3152,8 @@ ct2FileInput.addEventListener(
             return;
         }
 
-        if (!/\.(ct2|b90)$/i.test(file.name)) {
-            alert("請選擇 .ct2 或 .b90 檔案。");
+        if (!/\.ct2$/i.test(file.name)) {
+            alert("請選擇 .ct2 檔案。");
             ct2FileInput.value = "";
             return;
         }
