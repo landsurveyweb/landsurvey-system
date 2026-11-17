@@ -1204,10 +1204,16 @@ async function loadPoints({ fitBounds = false } = {}) {
     const panel = document.getElementById("pointListPanel");
     panel.textContent = "正在載入點位……";
     try {
-        const endpoint = scope.type === "point"
-            ? "/api/points/" + scope.id
-            : "/api/points?district=" + encodeURIComponent(scope.district);
-        const response = await fetch(endpoint);
+        let endpoint, options;
+        if (scope.type === "point") endpoint = "/api/points/" + scope.id;
+        else if (scope.type === "near") endpoint = "/api/points?x=" + encodeURIComponent(scope.x) + "&y=" + encodeURIComponent(scope.y);
+        else if (scope.type === "buffer") {
+            endpoint = "/api/points/buffer";
+            options = { method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ geometry: scope.geometry }) };
+        } else if (scope.type === "section") endpoint = "/api/points?section=" + encodeURIComponent(scope.sectionName);
+        else endpoint = "/api/points?district=" + encodeURIComponent(scope.district);
+        const response = await fetch(endpoint, options);
         if (scope.type === "point" && response.status === 404) {
             if (version !== pointLoadVersion) return false;
             clearPointDisplay();
@@ -1244,7 +1250,7 @@ function renderPointList() {
 
     if (allPoints.length === 0) {
         panel.textContent = currentPointScope.type === "none"
-            ? "請搜尋點名，或搜尋地號以載入該行政區點位。"
+            ? "請搜尋點名、地號或地址，或載入指定小段點位。"
             : "目前查詢範圍沒有正式點位。";
         return;
     }
@@ -1565,26 +1571,18 @@ async function locateAddress(address) {
 
     closeMobileSidebar();
 
-    showMessage("正在判定地址行政區並載入點位……");
+    showMessage("正在載入地址周圍 200 公尺內點位……");
     try {
-        const response = await fetch("/api/addresses/district?longitude=" +
-            encodeURIComponent(longitude) + "&latitude=" + encodeURIComponent(latitude));
-        if (!response.ok) throw new Error("無法判定地址行政區。");
-        const result = await response.json();
-        if (version !== addressLoadVersion) return;
-        if (!result.districtName) {
-            showMessage("已定位地址；此地址不在目前地籍段界涵蓋範圍，未載入點位。");
-            return;
-        }
-        const loaded = await selectPointScope({ type: "district", district: result.districtName });
+        const { x, y } = toTwd97(latitude, longitude);
+        const loaded = await selectPointScope({ type: "near", x, y });
         if (version !== addressLoadVersion) return;
         showMessage(loaded
-            ? "已定位地址；已載入" + result.districtName + " " + allPoints.length.toLocaleString() + " 筆點位。"
-            : "已定位地址；點位載入失敗，請重新選取地址。");
+            ? "已定位地址；周圍 200 公尺內 " + allPoints.length.toLocaleString() + " 筆點位。"
+            : "已定位地址；周圍點位載入失敗，請重新選取地址。");
     } catch (error) {
         if (version !== addressLoadVersion) return;
         console.error(error);
-        showMessage("已定位地址；行政區點位載入失敗，請重新選取地址。");
+        showMessage("已定位地址；周圍點位載入失敗，請重新選取地址。");
     }
 }
 
@@ -1848,7 +1846,7 @@ async function previewCt2File(file) {
         `檔案：${file.name}`;
     const isB90 = file.name.toLowerCase().endsWith(".b90");
     const title = document.getElementById("importDialogTitle");
-    if (title) title.textContent = isB90 ? "匯入 .b90 點位並建立導線" : "匯入 .ct2 點位";
+    if (title) title.textContent = isB90 ? "匯入 .b90 與導線（測點限 Q 開頭）" : "匯入 .ct2 點位";
 
     importSummary.textContent =
         "正在解析檔案……";
@@ -3926,7 +3924,6 @@ async function loadAndSearchParcels() {
     const version = ++parcelSearchVersion;
     ++pointSearchVersion;
     document.getElementById("searchResultPanel").classList.add("hidden");
-    const district = document.getElementById("parcelDistrictSelect").value;
     const sectionCode = document.getElementById("parcelSectionSelect").value;
     const input = document.getElementById("parcelNumberInput").value;
     const status = document.getElementById("parcelStatus");
@@ -3969,20 +3966,23 @@ async function loadAndSearchParcels() {
                 status.textContent = "此地籍段找不到該地號。";
                 return;
             }
-            const loaded = await selectPointScope({ type: "district", district });
+            const loaded = await selectPointScope({ type: "buffer", geometry: found.toGeoJSON().geometry });
             if (version !== parcelSearchVersion) return;
             found.setStyle?.({ color: "#dc2626", weight: 3, fillOpacity: 0.22 });
             map.fitBounds(found.getBounds(), { maxZoom: 20, padding: [24, 24] });
             found.openPopup();
             status.textContent = loaded
-                ? "已定位地號；已載入" + district + " " + allPoints.length.toLocaleString() + " 筆點位。"
+                ? "已定位地號；土地範圍及外擴 200 公尺內 " + allPoints.length.toLocaleString() + " 筆點位。"
                 : "已定位地號；點位載入失敗，請重新搜尋。";
         } else {
-            const loaded = await selectPointScope({ type: "district", district });
+            const selected = document.getElementById("parcelSectionSelect").selectedOptions[0];
+            const sectionName = selected?.dataset.fullName;
+            if (!sectionName) throw new Error("請重新選擇小段。");
+            const loaded = await selectPointScope({ type: "section", sectionName });
             if (version !== parcelSearchVersion) return;
             map.fitBounds(parcelLayer.getBounds(), { padding: [20, 20] });
             status.textContent = loaded
-                ? "已載入本段 " + parcelLayer.getLayers().length.toLocaleString() + " 筆地籍；" + district + " " + allPoints.length.toLocaleString() + " 筆點位。"
+                ? "已載入本段 " + parcelLayer.getLayers().length.toLocaleString() + " 筆地籍；本小段 " + allPoints.length.toLocaleString() + " 筆點位。"
                 : "已載入地籍；點位載入失敗，請重新搜尋。";
         }
         closeMobileSidebar();
@@ -3998,6 +3998,29 @@ document.getElementById("parcelSearchButton")?.addEventListener("click", loadAnd
 document.getElementById("parcelNumberInput")?.addEventListener("keydown", event => {
     if (event.key === "Enter") loadAndSearchParcels();
 });
+async function loadSelectedSubsectionPoints() {
+    ++addressLoadVersion;
+    ++parcelSearchVersion;
+    const version = parcelSearchVersion;
+    const selected = document.getElementById("parcelSectionSelect").selectedOptions[0];
+    const sectionName = selected?.dataset.fullName;
+    const status = document.getElementById("parcelStatus");
+    if (!sectionName) { status.textContent = "請先選擇行政區、段與小段。"; return; }
+    document.getElementById("searchResultPanel").classList.add("hidden");
+    // This action loads points only; an old cadastral highlight should not imply the new scope.
+    parcelLayer.clearLayers();
+    loadedParcelSectionCode = "";
+    status.textContent = "正在載入小段點位……";
+    const loaded = await selectPointScope({ type: "section", sectionName }, true);
+    if (version !== parcelSearchVersion) return;
+    status.textContent = loaded
+        ? "已載入" + sectionName + " " + allPoints.length.toLocaleString() + " 筆點位。"
+        : "小段點位載入失敗，請重試。";
+    if (loaded) closeMobileSidebar();
+}
+
+document.getElementById("loadSubsectionPointsButton")?.addEventListener("click", loadSelectedSubsectionPoints);
+
 function clearParcelsAndPoints() {
     ++parcelSearchVersion;
     ++addressLoadVersion;

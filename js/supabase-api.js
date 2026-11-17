@@ -159,11 +159,13 @@ async function parseB90(file) {
             return;
         }
         match = line.match(/^施\s*測\s*點:\s*(\S+)\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)/);
-        if (match && current) current.measured.push(addPoint(match[1], match[2], match[3], "forward", index + 1));
+        if (match && current && /^Q/i.test(match[1])) {
+            current.measured.push(addPoint(match[1], match[2], match[3], "forward", index + 1));
+        }
     });
     if (current?.station && current?.target && current.measured.length) routes.push(current);
     const items = [...points.values()];
-    if (!items.length || !routes.length) throw new Error("找不到完整的測站、標定點及施測點資料。");
+    if (!items.length || !routes.length) throw new Error("找不到包含測站、標定點及 Q 開頭施測點的完整資料。");
     return { totalCount: items.length, validCount: items.length, skippedCount: 0, importedCount: 0, items, routes };
 }
 
@@ -193,6 +195,47 @@ async function fetchAllSurveyPoints(supabase, columns = "*", filter = query => q
     }
 
     return rows;
+}
+
+
+async function pointsInMetricBuffer(supabase, bounds, contains) {
+    const rows = await fetchAllSurveyPoints(supabase, "*", query => query
+        .gte("x", bounds.minX - 200.001).lte("x", bounds.maxX + 200.001)
+        .gte("y", bounds.minY - 200.001).lte("y", bounds.maxY + 200.001));
+    return rows.filter(row => contains(Number(row.x), Number(row.y))).map(pointFromRow);
+}
+
+function segmentDistanceSquared(x, y, a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const length = dx * dx + dy * dy;
+    const t = length ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / length)) : 0;
+    return (x - a[0] - t * dx) ** 2 + (y - a[1] - t * dy) ** 2;
+}
+
+async function parcelBufferPoints(supabase, geometry) {
+    const rawPolygons = geometry?.type === "Polygon" ? [geometry.coordinates]
+        : geometry?.type === "MultiPolygon" ? geometry.coordinates : null;
+    if (!rawPolygons?.length) throw new Error("地號缺少有效的土地範圍。");
+    const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    const polygons = rawPolygons.map(polygon => {
+        if (!Array.isArray(polygon) || !polygon.length) throw new Error("土地圖形不正確。");
+        return polygon.map(ring => {
+            if (!Array.isArray(ring) || ring.length < 4) throw new Error("土地邊界不正確。");
+            return ring.map(coordinate => {
+                const [longitude, latitude] = coordinate;
+                if (!Number.isFinite(longitude) || !Number.isFinite(latitude) ||
+                    Math.abs(longitude) > 180 || Math.abs(latitude) > 90) throw new Error("土地座標不正確。");
+                const [x, y] = window.proj4("EPSG:4326", "EPSG:3826", [longitude, latitude]);
+                if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("土地座標轉換失敗。");
+                bounds.minX = Math.min(bounds.minX, x); bounds.maxX = Math.max(bounds.maxX, x);
+                bounds.minY = Math.min(bounds.minY, y); bounds.maxY = Math.max(bounds.maxY, y);
+                return [x, y];
+            });
+        });
+    });
+    return pointsInMetricBuffer(supabase, bounds, (x, y) => polygons.some(polygon =>
+        pointInPolygon(x, y, polygon) || polygon.some(ring => ring.some((a, index) =>
+            segmentDistanceSquared(x, y, a, ring[(index + 1) % ring.length]) <= 40000 + 1e-6))));
 }
 
 async function duplicateWarnings(supabase, pointName, x, y, excludedId = null) {
@@ -252,8 +295,20 @@ export function installApiAdapter(supabase, user) {
             if (url.pathname === "/api/points" && method === "GET") {
                 const keyword = (url.searchParams.get("q") || "").trim();
                 const district = (url.searchParams.get("district") || "").trim();
+                const section = (url.searchParams.get("section") || "").trim();
+                const hasNear = url.searchParams.has("x") || url.searchParams.has("y");
                 let data;
-                if (keyword) {
+                if (hasNear) {
+                    const xText = url.searchParams.get("x"), yText = url.searchParams.get("y");
+                    const x = Number(xText), y = Number(yText);
+                    if (!xText || !yText || !Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0)
+                        throw new Error("搜尋中心座標不正確。");
+                    return jsonResponse(await pointsInMetricBuffer(supabase,
+                        { minX: x, maxX: x, minY: y, maxY: y },
+                        (px, py) => (px - x) ** 2 + (py - y) ** 2 <= 40000 + 1e-6));
+                } else if (section) {
+                    data = await fetchAllSurveyPoints(supabase, "*", query => query.eq("section_name", section));
+                } else if (keyword) {
                     // Escape SQL LIKE wildcards so a point name is treated as literal text.
                     const pattern = keyword.replace(/[\\%_]/g, "\\$&");
                     const result = await supabase.from("survey_points").select("*")
@@ -269,6 +324,11 @@ export function installApiAdapter(supabase, user) {
                     return jsonResponse([]);
                 }
                 return jsonResponse(data.map(pointFromRow));
+            }
+
+            if (url.pathname === "/api/points/buffer" && method === "POST") {
+                const body = JSON.parse(init.body || "{}");
+                return jsonResponse(await parcelBufferPoints(supabase, body.geometry));
             }
 
             if (url.pathname === "/api/points" && method === "POST") {
