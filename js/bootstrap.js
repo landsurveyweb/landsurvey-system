@@ -1,6 +1,6 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
-import { installApiAdapter } from "./supabase-api.js";
+import { installApiAdapter } from "./supabase-api.js?v=20261117-1";
 
 if (SUPABASE_URL.includes("YOUR_PROJECT") || SUPABASE_ANON_KEY.includes("YOUR_SUPABASE")) {
     document.body.innerHTML = `<main style="max-width:720px;margin:8vh auto;padding:24px;font-family:system-ui;line-height:1.7">
