@@ -167,9 +167,38 @@ async function parseB90(file) {
     return { totalCount: items.length, validCount: items.length, skippedCount: 0, importedCount: 0, items, routes };
 }
 
+async function fetchAllSurveyPoints(supabase, columns = "*") {
+    const pageSize = 500;
+    const rows = [];
+    let lastId = null;
+
+    while (true) {
+        let query = supabase
+            .from("survey_points")
+            .select(columns)
+            .order("id", { ascending: true })
+            .limit(pageSize);
+
+        if (lastId !== null) {
+            query = query.gt("id", lastId);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+        if (!data?.length) break;
+
+        rows.push(...data);
+        lastId = data[data.length - 1].id;
+    }
+
+    return rows;
+}
+
 async function duplicateWarnings(supabase, pointName, x, y, excludedId = null) {
-    const { data, error } = await supabase.from("survey_points").select("id,point_name,section_name,x,y");
-    if (error) throw error;
+    const data = await fetchAllSurveyPoints(
+    supabase,
+    "id,point_name,section_name,x,y"
+);
     return data.filter(row => row.id !== excludedId).map(row => {
         const distance = Math.hypot(Number(row.x) - x, Number(row.y) - y);
         const sameName = row.point_name === pointName;
@@ -215,8 +244,7 @@ export function installApiAdapter(supabase, user) {
 
         try {
             if (url.pathname === "/api/points" && method === "GET") {
-                const { data, error } = await supabase.from("survey_points").select("*").order("id");
-                if (error) throw error;
+                const data = await fetchAllSurveyPoints(supabase);
                 const points = await Promise.all(data.map(async row => {
                     const point = pointFromRow(row);
                     if (!point.sectionName) point.sectionName = await findSectionName(point.longitude, point.latitude);
