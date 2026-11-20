@@ -260,7 +260,15 @@ export function installApiAdapter(supabase, user) {
                 const section = (url.searchParams.get("section") || "").trim();
                 const hasNear = url.searchParams.has("x") || url.searchParams.has("y");
                 let data;
-                if (hasNear) {
+                const idsText = url.searchParams.get("ids");
+                if (idsText !== null) {
+                    const ids = idsText.split(",");
+                    if (!ids.length || ids.length > 100 || ids.some(id => !/^[1-9]\d*$/.test(id)))
+                        throw new Error("點位編號不正確。");
+                    const result = await supabase.from("survey_points").select("*").in("id", ids.map(Number));
+                    if (result.error) throw result.error;
+                    return jsonResponse(result.data.map(pointFromRow));
+                } else if (hasNear) {
                     const xText = url.searchParams.get("x"), yText = url.searchParams.get("y");
                     const x = Number(xText), y = Number(yText);
                     if (!xText || !yText || !Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0)

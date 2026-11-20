@@ -203,6 +203,9 @@ let currentCt2File = null;
 let currentCt2Preview = null;
 
 let allPoints = [];
+// Kept only for this page lifetime; a browser refresh starts a fresh map session.
+const sessionAddedPoints = new Map();
+let scopedPointCount = 0;
 let currentPointScope = { type: "none" };
 let pointLoadVersion = 0;
 let pointSearchVersion = 0;
@@ -1174,7 +1177,7 @@ async function loadTraverses() {
 
 window.loadTraverses = loadTraverses;
 
-function clearPointDisplay() {
+function clearPointDisplay({ preserveAdded = true } = {}) {
     allPoints = [];
     controlPointLayer.clearLayers();
     supplementPointLayer.clearLayers();
@@ -1183,8 +1186,37 @@ function clearPointDisplay() {
     clearDisplayedTraverses();
     allTraverseRoutes = [];
     traversePointById.clear();
+    if (preserveAdded) {
+        allPoints = [...sessionAddedPoints.values()];
+        allPoints.forEach(createPointMarker);
+    }
     renderPointList();
     renderTraverseRouteList();
+}
+
+function displayPointRows(rows) {
+    clearPointDisplay({ preserveAdded: false });
+    const merged = new Map(rows.map(point => [point.id, point]));
+    sessionAddedPoints.forEach((point, id) => merged.set(id, point));
+    allPoints = [...merged.values()];
+    allPoints.forEach(createPointMarker);
+    renderPointList();
+}
+
+async function refreshSessionAddedPoints(version) {
+    const ids = [...sessionAddedPoints.keys()];
+    const fresh = new Map();
+    for (let offset = 0; offset < ids.length; offset += 100) {
+        const response = await fetch("/api/points?ids=" + ids.slice(offset, offset + 100).join(","));
+        if (!response.ok) throw new Error("新增點位同步失敗（HTTP " + response.status + "）");
+        const rows = await response.json();
+        rows.forEach(point => fresh.set(point.id, point));
+    }
+    if (version !== pointLoadVersion) return;
+    ids.forEach(id => {
+        if (fresh.has(id)) sessionAddedPoints.set(id, fresh.get(id));
+        else sessionAddedPoints.delete(id); // Deleted or no longer readable, never restore stale rows.
+    });
 }
 
 async function selectPointScope(scope, fitBounds = false) {
@@ -1197,13 +1229,21 @@ async function selectPointScope(scope, fitBounds = false) {
 async function loadPoints({ fitBounds = false } = {}) {
     const version = ++pointLoadVersion;
     const scope = currentPointScope;
-    if (scope.type === "none") {
+    if (scope.type === "none" && !sessionAddedPoints.size) {
         clearPointDisplay();
         return true;
     }
     const panel = document.getElementById("pointListPanel");
     panel.textContent = "正在載入點位……";
     try {
+        await refreshSessionAddedPoints(version);
+        if (version !== pointLoadVersion) return false;
+        if (scope.type === "none") {
+            scopedPointCount = 0;
+            displayPointRows([]);
+            await loadTraverses();
+            return version === pointLoadVersion;
+        }
         let endpoint, options;
         if (scope.type === "point") endpoint = "/api/points/" + scope.id;
         else if (scope.type === "near") endpoint = "/api/points?x=" + encodeURIComponent(scope.x) + "&y=" + encodeURIComponent(scope.y);
@@ -1223,12 +1263,11 @@ async function loadPoints({ fitBounds = false } = {}) {
         if (!response.ok) throw new Error("HTTP " + response.status);
         const result = await response.json();
         if (version !== pointLoadVersion) return false;
-        clearPointDisplay();
-        allPoints = scope.type === "point" ? [result] : result;
-        allPoints.forEach(createPointMarker);
-        renderPointList();
-        if (fitBounds && allPoints.length) {
-            map.fitBounds(L.latLngBounds(allPoints.map(point => [point.latitude, point.longitude])),
+        const scopedRows = scope.type === "point" ? [result] : result;
+        scopedPointCount = scopedRows.length;
+        displayPointRows(scopedRows);
+        if (fitBounds && scopedRows.length) {
+            map.fitBounds(L.latLngBounds(scopedRows.map(point => [point.latitude, point.longitude])),
                 { padding: [35, 35], maxZoom: 18 });
         }
         await loadTraverses();
@@ -1577,7 +1616,7 @@ async function locateAddress(address) {
         const loaded = await selectPointScope({ type: "near", x, y });
         if (version !== addressLoadVersion) return;
         showMessage(loaded
-            ? "已定位地址；周圍 200 公尺內 " + allPoints.length.toLocaleString() + " 筆點位。"
+            ? "已定位地址；周圍 200 公尺內 " + scopedPointCount.toLocaleString() + " 筆點位。"
             : "已定位地址；周圍點位載入失敗，請重新選取地址。");
     } catch (error) {
         if (version !== addressLoadVersion) return;
@@ -1797,8 +1836,10 @@ async function savePoint() {
 
         showMessage(isEdit ? "已更新 " + pointName : "已新增 " + pointName);
 
-        if (!isEdit) await selectPointScope({ type: "point", id: result.id }, true);
-        else await loadPoints();
+        if (!isEdit || sessionAddedPoints.has(result.id)) sessionAddedPoints.set(result.id, result);
+        if (!isEdit) displayPointRows(allPoints);
+        await loadPoints();
+        if (!isEdit) map.setView([result.latitude, result.longitude], 19);
     } catch (error) {
         console.error(error);
 
@@ -3308,6 +3349,7 @@ window.deletePoint = async function (id) {
             `已刪除點位 ${point.pointName}`
         );
 
+        sessionAddedPoints.delete(id);
         await loadPoints();
     } catch (error) {
         console.error(error);
@@ -3964,7 +4006,7 @@ async function loadAndSearchParcels() {
             map.fitBounds(found.getBounds(), { maxZoom: 20, padding: [24, 24] });
             found.openPopup();
             status.textContent = loaded
-                ? "已定位地號；土地範圍及外擴 200 公尺內 " + allPoints.length.toLocaleString() + " 筆點位。"
+                ? "已定位地號；土地範圍及外擴 200 公尺內 " + scopedPointCount.toLocaleString() + " 筆點位。"
                 : "已定位地號；點位載入失敗，請重新搜尋。";
         } else {
             const selected = document.getElementById("parcelSectionSelect").selectedOptions[0];
@@ -3974,7 +4016,7 @@ async function loadAndSearchParcels() {
             if (version !== parcelSearchVersion) return;
             map.fitBounds(parcelLayer.getBounds(), { padding: [20, 20] });
             status.textContent = loaded
-                ? "已載入本段 " + parcelLayer.getLayers().length.toLocaleString() + " 筆地籍；本小段 " + allPoints.length.toLocaleString() + " 筆點位。"
+                ? "已載入本段 " + parcelLayer.getLayers().length.toLocaleString() + " 筆地籍；本小段 " + scopedPointCount.toLocaleString() + " 筆點位。"
                 : "已載入地籍；點位載入失敗，請重新搜尋。";
         }
         closeMobileSidebar();
@@ -4006,7 +4048,7 @@ async function loadSelectedSubsectionPoints() {
     const loaded = await selectPointScope({ type: "section", sectionName }, true);
     if (version !== parcelSearchVersion) return;
     status.textContent = loaded
-        ? "已載入" + sectionName + " " + allPoints.length.toLocaleString() + " 筆點位。"
+        ? "已載入" + sectionName + " " + scopedPointCount.toLocaleString() + " 筆點位。"
         : "小段點位載入失敗，請重試。";
     if (loaded) closeMobileSidebar();
 }
@@ -4026,7 +4068,9 @@ function clearParcelsAndPoints() {
     loadedParcelSectionCode = "";
     // Reset scope as well as layers, so pending queries and realtime cannot restore points.
     selectPointScope({ type: "none" });
-    document.getElementById("parcelStatus").textContent = "已清除地籍圖、正式點位與導線。";
+    document.getElementById("parcelStatus").textContent = sessionAddedPoints.size
+        ? "已清除查詢圖層；保留本次新增的 " + sessionAddedPoints.size + " 筆點位。"
+        : "已清除地籍圖、正式點位與導線。";
 }
 
 document.getElementById("parcelClearButton")?.addEventListener("click", clearParcelsAndPoints);
