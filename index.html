@@ -275,7 +275,9 @@
                 <section class="sidebar-section">
                     <h2 class="section-title">匯入點位</h2>
                     <button id="importPlaceholderButton" class="action-button" type="button">⇧ 匯入 .ct2</button>
-                    <div class="help-text">Q 開頭歸類為補點，其餘歸類為圖根點。</div>
+                    <button id="importB90Button" class="action-button" type="button" style="margin-top:8px;">⇧ 匯入 .b90（Q 補點）</button>
+                    <button id="importTxtButton" class="action-button" type="button" style="margin-top:8px;">⇧ 匯入 .txt（Q 補點）</button>
+                    <div class="help-text">CT2：Q 開頭為補點，其餘為圖根點。B90／TXT：只匯入 Q 開頭補點，不建立導線。</div>
                 </section>
 
                 <section class="sidebar-section">
@@ -424,7 +426,7 @@
                             圖根點
                         </option>
 
-                        <option value="supplement">
+                        <option value="supplement" selected>
                             補點
                         </option>
                     </select>
@@ -490,7 +492,7 @@
 <input
     id="ct2FileInput"
     type="file"
-    accept=".ct2"
+    accept=".ct2,.b90,.txt"
     hidden
 />
 
@@ -523,7 +525,7 @@
             id="importSummary"
             class="auto-section-panel"
         >
-            請先選擇 .ct2 檔案。
+            請先選擇要匯入的檔案。
         </div>
 
         <div
@@ -810,7 +812,7 @@
 
     <script src="./js/parcel-sections.js?v=202608101200"></script>
 
-    <script type="module" src="./js/bootstrap.js?v=20261120-keep-added"></script>
+    <script type="module" src="./js/bootstrap.js?v=20261120-q-imports"></script>
     
 </body>
 </html>

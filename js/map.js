@@ -1688,7 +1688,7 @@ function openPointDialog(latLng) {
 
     document.getElementById(
         "pointTypeInput"
-    ).value = "control";
+    ).value = "supplement";
 
     document.getElementById(
         "pointStatusInput"
@@ -1883,7 +1883,10 @@ async function previewCt2File(file) {
     importFileName.textContent =
         `檔案：${file.name}`;
     const title = document.getElementById("importDialogTitle");
-    if (title) title.textContent = "匯入 .ct2 點位";
+    if (title) {
+        const format = file.name.split(".").pop().toLowerCase();
+        title.textContent = format === "ct2" ? "匯入 .ct2 點位" : "匯入 ." + format + "（僅 Q 開頭補點）";
+    }
 
     importSummary.textContent =
         "正在解析檔案……";
@@ -1914,7 +1917,7 @@ async function previewCt2File(file) {
 
     try {
         const response = await fetch(
-            "/api/import/ct2/preview",
+            "/api/import/points/preview",
             {
                 method: "POST",
                 body: formData
@@ -1991,7 +1994,7 @@ function renderCt2Preview(result) {
             正確 ${validCount} 筆
         </strong>｜
         <strong style="color:#b42318;">
-            錯誤 ${skippedCount} 筆
+            略過／錯誤 ${skippedCount} 筆
         </strong>
     `;
 
@@ -2018,8 +2021,8 @@ function renderCt2Preview(result) {
     importPreviewBody.innerHTML =
         items
             .map(item => {
-                const isValid =
-                    item.status === "valid";
+                const isValid = item.status === "valid";
+                const isIgnored = item.status === "ignored" || item.status === "duplicate";
 
                 const pointType =
                     item.pointType === "supplement"
@@ -2040,7 +2043,7 @@ function renderCt2Preview(result) {
                             color:${
                                 isValid
                                     ? "#20242a"
-                                    : "#b42318"
+                                    : isIgnored ? "#667085" : "#b42318"
                             };
                         "
                     >
@@ -2125,7 +2128,7 @@ async function importCt2Points() {
 
     try {
         const response = await fetch(
-            "/api/import/ct2/import",
+            "/api/import/points/import",
             {
                 method: "POST",
                 body: formData
@@ -2156,6 +2159,9 @@ async function importCt2Points() {
         }
 
         currentCt2Preview = result;
+        for (const item of result.items || []) {
+            if (item.status === "imported" && item.point) sessionAddedPoints.set(item.point.id, item.point);
+        }
 
         renderCt2ImportResult(result);
 
@@ -3180,6 +3186,14 @@ document.getElementById("startTraverseButton")?.addEventListener("click", startT
 document.getElementById("cancelTraverseButton")?.addEventListener("click", cancelTraverseCreation);
 document.getElementById("saveTraverseButton")?.addEventListener("click", saveTraverseRoute);
 
+for (const [buttonId, extension] of [["importB90Button", ".b90"], ["importTxtButton", ".txt"]]) {
+    document.getElementById(buttonId)?.addEventListener("click", () => {
+        ct2FileInput.value = "";
+        ct2FileInput.accept = extension;
+        ct2FileInput.click();
+    });
+}
+
 ct2FileInput.addEventListener(
     "change",
     async () => {
@@ -3190,8 +3204,8 @@ ct2FileInput.addEventListener(
             return;
         }
 
-        if (!/\.ct2$/i.test(file.name)) {
-            alert("請選擇 .ct2 檔案。");
+        if (!/\.(ct2|b90|txt)$/i.test(file.name)) {
+            alert("請選擇 .ct2、.b90 或 .txt 檔案。");
             ct2FileInput.value = "";
             return;
         }

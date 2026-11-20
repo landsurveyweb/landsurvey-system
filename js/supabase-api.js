@@ -131,6 +131,69 @@ async function parseCt2(file) {
     return { totalCount, validCount, skippedCount, importedCount: 0, items };
 }
 
+
+async function readSurveyText(file) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
+    if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch { return new TextDecoder("big5", { fatal: true }).decode(bytes); }
+}
+
+async function parseQPointFile(file, format) {
+    if (!file) throw new Error("請選擇點位檔案。");
+    if (file.size > 10 * 1024 * 1024) throw new Error("檔案不可超過 10 MB。");
+    const lines = (await readSurveyText(file)).replace(/^\uFEFF/, "").split(/\r\n|\n|\r/);
+    const items = [], seen = new Set();
+    let validCount = 0, skippedCount = 0, ignoredCount = 0, errorCount = 0, duplicateCount = 0;
+    lines.forEach((raw, index) => {
+        const line = raw.replace(/\u0000/g, "").trim();
+        if (!line) return;
+        let fields;
+        if (format === "b90") {
+            const record = line.match(/^(?:測\s*站|標\s*定\s*點|施\s*測\s*點)\s*[:：]\s*(.*)$/);
+            if (!record) return;
+            fields = record[1].trim().split(/\s+/);
+        } else {
+            fields = line.includes(",") ? line.split(",").map(value => value.trim()) : line.split(/\s+/);
+            // A column heading is not a point record.
+            if (/^(?:點名|點號|point_?name|name)$/i.test(fields[0])) return;
+        }
+        const unquote = value => String(value || "").replace(/^"(.*)"$/, "$1").trim();
+        const pointName = unquote(fields[0]);
+        const item = { lineNumber: index + 1, pointName, pointType: "supplement" };
+        if (!/^Q/i.test(pointName)) {
+            items.push({ ...item, pointType: null, status: "ignored", message: "非 Q 開頭，略過。" });
+            ignoredCount++; skippedCount++; return;
+        }
+        const yText = unquote(fields[1]), xText = unquote(fields[2]);
+        const numeric = /^\+?\d+(?:\.\d+)?$/;
+        const x = round3(xText), y = round3(yText);
+        if (!numeric.test(xText) || !numeric.test(yText) || !Number.isFinite(x) || !Number.isFinite(y) || x <= 0 || y <= 0) {
+            items.push({ ...item, status: "error", message: "座標格式錯誤，應為點名、Y、X。" });
+            errorCount++; skippedCount++; return;
+        }
+        // Same name and millimetre-rounded coordinates are one point within this file.
+        const key = JSON.stringify([pointName.toUpperCase(), x, y]);
+        if (seen.has(key)) {
+            items.push({ ...item, x, y, status: "duplicate", message: "檔案內相同點名與座標重複，略過。" });
+            duplicateCount++; skippedCount++; return;
+        }
+        seen.add(key);
+        items.push({ ...item, x, y, status: "valid", message: "Q 開頭，將匯入為補點。" });
+        validCount++;
+    });
+    return { totalCount: items.length, validCount, skippedCount, ignoredCount, errorCount,
+        duplicateCount, importedCount: 0, sourceFormat: format, items };
+}
+
+async function parsePointFile(file) {
+    const format = file?.name.split(".").pop().toLowerCase();
+    if (format === "ct2") return parseCt2(file);
+    if (format === "b90" || format === "txt") return parseQPointFile(file, format);
+    throw new Error("請選擇 .ct2、.b90 或 .txt 檔案。");
+}
+
 async function fetchAllSurveyPoints(supabase, columns = "*", filter = query => query) {
     const pageSize = 500;
     const rows = [];
@@ -384,16 +447,21 @@ export function installApiAdapter(supabase, user) {
                 }
             }
 
-            if (url.pathname === "/api/import/ct2/preview" && method === "POST") {
+            if (["/api/import/points/preview", "/api/import/ct2/preview"].includes(url.pathname) && method === "POST") {
                 const file = init.body?.get("file");
-                return jsonResponse(await parseCt2(file));
+                return jsonResponse(await parsePointFile(file));
             }
 
-            if (url.pathname === "/api/import/ct2/import" && method === "POST") {
+            if (["/api/import/points/import", "/api/import/ct2/import"].includes(url.pathname) && method === "POST") {
                 const file = init.body?.get("file");
-                const result = await parseCt2(file);
+                const result = await parsePointFile(file);
                 for (const item of result.items.filter(item => item.status === "valid")) {
-                    const warnings = await duplicateWarnings(supabase, item.pointName, item.x, item.y);
+                    // Q-file examples include differently named points only centimetres apart.
+                    // For these imports, only identical name + rounded coordinates is a duplicate.
+                    const warnings = result.sourceFormat
+                        ? await fetchAllSurveyPoints(supabase, "id", query => query
+                            .eq("point_name", item.pointName).eq("x", item.x).eq("y", item.y))
+                        : await duplicateWarnings(supabase, item.pointName, item.x, item.y);
                     if (warnings.length) {
                         item.status = "duplicate";
                         item.message = "已有相同點位，將沿用既有資料。";
@@ -402,17 +470,18 @@ export function installApiAdapter(supabase, user) {
                     }
                     const { longitude, latitude } = coordinates(item.x, item.y);
                     const sectionName = await findSectionName(longitude, latitude);
-                    const { error } = await supabase.from("survey_points").insert({
+                    const { data: inserted, error } = await supabase.from("survey_points").insert({
                         point_name: item.pointName, point_type: item.pointType, status: "active",
                         x: item.x, y: item.y, longitude, latitude, section_name: sectionName,
                         remark: `由 ${file.name} 匯入`, created_by: user.id, updated_by: user.id,
                         import_source: file.name
-                    }).select("id").single();
+                    }).select("*").single();
                     if (error) {
                         item.status = "error";
                         item.message = error.message;
                         result.skippedCount++;
                     } else {
+                        item.point = pointFromRow(inserted);
                         item.status = "imported";
                         item.message = "匯入成功";
                         result.importedCount++;
