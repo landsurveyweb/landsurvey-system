@@ -1615,17 +1615,14 @@ async function loadSections() {
 }
 
 function beginPointPlacement() {
-    pointPlacementMode = true;
-
-    map.getContainer().style.cursor =
-        "crosshair";
-
+    pointPlacementMode = false;
+    notePlacementMode = false;
+    ++addressLoadVersion;
+    ++parcelSearchVersion;
+    map.getContainer().style.cursor = "";
     closeMobileSidebar();
     closeContextMenu();
-
-    showMessage(
-        "請在地圖上點選正式點位位置"
-    );
+    openPointDialog(map.getCenter());
 }
 
 function openPointDialog(latLng) {
