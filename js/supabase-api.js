@@ -241,6 +241,35 @@ function segmentDistanceSquared(x, y, a, b) {
     return (x - a[0] - t * dx) ** 2 + (y - a[1] - t * dy) ** 2;
 }
 
+const metricGeometryCache = new WeakMap();
+
+function projectMetricGeometry(geometry) {
+    if (!geometry || !["Polygon", "MultiPolygon"].includes(geometry.type)) throw new Error("地籍圖形格式不正確。");
+    if (metricGeometryCache.has(geometry)) return metricGeometryCache.get(geometry);
+    const raw = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
+    const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    const polygons = raw.map(polygon => polygon.map(ring => ring.map(([longitude, latitude]) => {
+        const [x, y] = window.proj4("EPSG:4326", "EPSG:3826", [longitude, latitude]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("地籍圖座標不正確。");
+        bounds.minX = Math.min(bounds.minX, x); bounds.maxX = Math.max(bounds.maxX, x);
+        bounds.minY = Math.min(bounds.minY, y); bounds.maxY = Math.max(bounds.maxY, y);
+        return [x, y];
+    })));
+    const projected = { bounds, polygons };
+    metricGeometryCache.set(geometry, projected);
+    return projected;
+}
+
+function metricGeometryIntersectsCircle(geometry, x, y, radius = 200) {
+    const { bounds, polygons } = geometry;
+    const dx = Math.max(bounds.minX - x, 0, x - bounds.maxX);
+    const dy = Math.max(bounds.minY - y, 0, y - bounds.maxY);
+    const squaredRadius = radius * radius + 1e-6;
+    if (dx * dx + dy * dy > squaredRadius) return false;
+    return polygons.some(polygon => pointInPolygon(x, y, polygon) || polygon.some(ring =>
+        ring.some((a, index) => segmentDistanceSquared(x, y, a, ring[(index + 1) % ring.length]) <= squaredRadius)));
+}
+
 async function parcelBufferPoints(supabase, geometry) {
     const rawPolygons = geometry?.type === "Polygon" ? [geometry.coordinates]
         : geometry?.type === "MultiPolygon" ? geometry.coordinates : null;
@@ -313,6 +342,7 @@ async function pointPayload(supabase, user, body, excludedId = null) {
 }
 
 export function installApiAdapter(supabase, user) {
+    window.landSurveyGeometry = { projectMetricGeometry, metricGeometryIntersectsCircle };
     const nativeFetch = window.fetch.bind(window);
 
     window.fetch = async (input, init = {}) => {
@@ -561,8 +591,13 @@ export function installApiAdapter(supabase, user) {
                 const feature = await findSectionFeature(longitude, latitude);
                 const sectionName = feature?.properties?.fullName || feature?.properties?.sectionName || null;
                 const districtName = sectionName?.match(/^(.+?區)/)?.[1] || null;
-                return jsonResponse({ districtName, sectionName,
-                    ...(url.pathname === "/api/system/location-context" ? { feature: feature || null } : {}) });
+                if (url.pathname === "/api/system/location-context") {
+                    const [x, y] = window.proj4("EPSG:4326", "EPSG:3826", [longitude, latitude]);
+                    const nearbySections = (await loadSectionFeatures()).filter(item =>
+                        item.geometry && metricGeometryIntersectsCircle(projectMetricGeometry(item.geometry), x, y));
+                    return jsonResponse({ districtName, sectionName, feature: feature || null, nearbySections });
+                }
+                return jsonResponse({ districtName, sectionName });
             }
 
             if (url.pathname === "/api/addresses/search" && method === "GET") {

@@ -1,6 +1,6 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "./config.js";
-import { installApiAdapter } from "./supabase-api.js?v=20261124-live-parcels";
+import { installApiAdapter } from "./supabase-api.js?v=20261124-parcels-200m";
 
 if (SUPABASE_URL.includes("YOUR_PROJECT") || SUPABASE_ANON_KEY.includes("YOUR_SUPABASE")) {
     document.body.innerHTML = `<main style="max-width:720px;margin:8vh auto;padding:24px;font-family:system-ui;line-height:1.7">
@@ -45,7 +45,7 @@ installApiAdapter(supabase, session.user);
 
 await new Promise((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = "./js/map.js?v=20261124-live-parcels";
+    script.src = "./js/map.js?v=20261124-parcels-200m";
     script.onload = resolve;
     script.onerror = reject;
     document.body.appendChild(script);

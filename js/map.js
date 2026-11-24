@@ -2749,52 +2749,81 @@ function updateLiveLocationMarker(position, centerMap = false) {
     if (centerMap) map.setView(latLng, Math.max(map.getZoom(), 18));
 }
 
-async function loadLiveCadastral(context, current) {
+const liveParcelDataCache = new Map();
+
+async function getLiveParcelData(code, sectionName) {
+    if (liveParcelDataCache.has(code)) {
+        const cached = liveParcelDataCache.get(code);
+        liveParcelDataCache.delete(code);
+        liveParcelDataCache.set(code, cached);
+        return cached;
+    }
+    const pending = (async () => {
+        const { data, error } = await window.landSurveySupabase.storage
+            .from("cadastral-data").download(code + ".geojson");
+        if (error) throw error;
+        const geoJson = JSON.parse(await data.text());
+        if (geoJson.type !== "FeatureCollection" || !Array.isArray(geoJson.features)) throw new Error("地籍圖格式不正確");
+        return geoJson.features.map(feature => ({
+            feature: { ...feature, properties: { ...feature.properties, sectionCode: code, sectionName } },
+            metric: window.landSurveyGeometry.projectMetricGeometry(feature.geometry)
+        }));
+    })();
+    liveParcelDataCache.set(code, pending);
+    while (liveParcelDataCache.size > 6) liveParcelDataCache.delete(liveParcelDataCache.keys().next().value);
+    try { return await pending; }
+    catch (error) {
+        if (liveParcelDataCache.get(code) === pending) liveParcelDataCache.delete(code);
+        throw error;
+    }
+}
+
+async function loadLiveCadastral(context, current, center) {
     if (!current()) return { ok: false };
-    const properties = context?.feature?.properties;
-    const rawCode = properties?.sectionCode ?? properties?.SECTION_COD;
-    const code = rawCode == null ? "" : String(rawCode).trim().padStart(4, "0");
-    if (!code) {
+    const candidates = context?.nearbySections || (context?.feature ? [context.feature] : []);
+    const sections = new Map();
+    for (const section of candidates) {
+        const properties = section.properties || {};
+        const rawCode = properties.sectionCode ?? properties.SECTION_COD;
+        const code = rawCode == null ? "" : String(rawCode).trim().padStart(4, "0");
+        if (/^\d{4}$/.test(code)) sections.set(code, properties.fullName || properties.sectionName || context.sectionName || "地籍");
+    }
+    if (!sections.size) {
         parcelLayer.clearLayers();
         loadedParcelSectionCode = "";
         liveLoadedParcelCode = null;
-        return { ok: context !== null, message: context ? "目前位置無地籍圖資料" : "地籍範圍判定失敗" };
+        return { ok: context !== null, message: context ? "200 公尺內無可用地籍圖資料" : "地籍範圍判定失敗" };
     }
-    if (!/^\d{4}$/.test(code)) return { ok: false, message: "小段代碼不正確" };
-    const newlySelected = liveLoadedParcelCode !== code;
-    try {
-        if (loadedParcelSectionCode !== code || parcelLayer.getLayers().length === 0) {
-            // Do not leave another subsection's parcels displayed at the new location.
-            parcelLayer.clearLayers();
-            loadedParcelSectionCode = "";
-            liveLoadedParcelCode = null;
-            const { data, error } = await window.landSurveySupabase.storage
-                .from("cadastral-data").download(code + ".geojson");
-            if (error) throw error;
-            const geoJson = JSON.parse(await data.text());
-            if (!current()) return { ok: false };
-            if (geoJson.type !== "FeatureCollection" || !Array.isArray(geoJson.features)) {
-                throw new Error("地籍圖格式不正確");
-            }
-            for (const feature of geoJson.features) {
-                feature.properties ??= {};
-                feature.properties.sectionCode = code;
-                feature.properties.sectionName = context.sectionName || properties.fullName || properties.sectionName || "地籍";
-            }
-            parcelLayer.addData(geoJson);
-            loadedParcelSectionCode = code;
+    if (!Number.isFinite(center?.x) || !Number.isFinite(center?.y)) return { ok: false, message: "定位中心座標不正確" };
+    const results = await Promise.all([...sections].map(async ([code, name]) => {
+        try { return { code, rows: await getLiveParcelData(code, name) }; }
+        catch (error) { return { code, error }; }
+    }));
+    if (!current()) return { ok: false };
+    const features = [], failures = [];
+    for (const result of results) {
+        if (result.error) { failures.push(result.code); continue; }
+        for (const row of result.rows) {
+            if (window.landSurveyGeometry.metricGeometryIntersectsCircle(row.metric, center.x, center.y)) features.push(row.feature);
         }
-        if (newlySelected) {
-            const toggle = document.getElementById("parcelLayerToggle");
-            if (toggle) toggle.checked = true;
-            if (!map.hasLayer(parcelLayer)) parcelLayer.addTo(map);
-        }
-        liveLoadedParcelCode = code;
-        return { ok: true, message: "已載入地籍圖" };
-    } catch (error) {
-        if (current()) console.error(error);
-        return { ok: false, message: "地籍圖載入失敗（" + (error?.message || "請稍後重試") + "）" };
     }
+    const signature = "nearby:" + [...sections.keys()].sort().join(",");
+    const newlySelected = liveLoadedParcelCode !== signature;
+    parcelLayer.clearLayers();
+    parcelLayer.addData({ type: "FeatureCollection", features });
+    // This is a filtered multi-section view, never a complete manual-search subsection.
+    loadedParcelSectionCode = "";
+    liveLoadedParcelCode = signature;
+    if (newlySelected) {
+        const toggle = document.getElementById("parcelLayerToggle");
+        if (toggle) toggle.checked = true;
+        if (!map.hasLayer(parcelLayer)) parcelLayer.addTo(map);
+    }
+    return {
+        ok: failures.length === 0,
+        message: "200 公尺內 " + features.length.toLocaleString() + " 筆地籍" +
+            (failures.length ? "；小段 " + failures.join("、") + " 下載失敗，稍後重試" : "")
+    };
 }
 
 function setLiveNearbyStatus(text) {
@@ -2828,7 +2857,7 @@ async function refreshLiveNearby(position, requestVersion) {
     liveNearbyInFlight = true;
     const version = liveNearbyVersion;
     const current = () => liveNearbyEnabled && version === liveNearbyVersion && requestVersion === liveLocationRequestVersion;
-    setLiveNearbyStatus("正在載入所在小段地籍圖與周圍 200 公尺點位……");
+    setLiveNearbyStatus("正在載入周圍 200 公尺地籍圖與點位……");
     try {
         let context = null;
         try {
@@ -2843,7 +2872,7 @@ async function refreshLiveNearby(position, requestVersion) {
         liveSectionLayer.clearLayers();
         if (context?.feature) liveSectionLayer.addData(context.feature);
         if (!map.hasLayer(liveSectionLayer)) liveSectionLayer.addTo(map);
-        const cadastral = await loadLiveCadastral(context, current);
+        const cadastral = await loadLiveCadastral(context, current, { x, y });
         if (!current()) return;
         const sectionText = context?.sectionName || (context ? "目前位置無段界資料" : "段界載入失敗");
         setLiveNearbyStatus(loaded
