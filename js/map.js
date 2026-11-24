@@ -219,6 +219,7 @@ let allTraverseRoutes = [];
 let traverseBuildState = null;
 let activeTraversePointId = null;
 let liveLocationWatchId = null;
+let liveLocationRequestVersion = 0;
 let liveLocationMarker = null;
 let liveLocationAccuracyCircle = null;
 let parcelSectionCatalog = [];
@@ -2700,8 +2701,6 @@ function locateCurrentPosition() {
                 .bindPopup("目前位置")
                 .openPopup();
 
-            closeMobileSidebar();
-
             showMessage(
                 "已定位到目前位置"
             );
@@ -2738,6 +2737,7 @@ function updateLiveLocationMarker(position, centerMap = false) {
 }
 
 function stopLiveLocation() {
+    ++liveLocationRequestVersion;
     if (liveLocationWatchId !== null) navigator.geolocation.clearWatch(liveLocationWatchId);
     liveLocationWatchId = null;
     const button = document.getElementById("locateButton");
@@ -2753,15 +2753,75 @@ function toggleLiveLocation() {
     }
     document.getElementById("locateButton").textContent = "停止即時定位";
     showMessage("正在開啟即時定位……");
+    closeMobileSidebar();
+    const requestVersion = ++liveLocationRequestVersion;
     let first = true;
     liveLocationWatchId = navigator.geolocation.watchPosition(
-        position => { updateLiveLocationMarker(position, first); first = false; closeMobileSidebar(); },
-        error => { console.error(error); stopLiveLocation(); alert("無法取得即時位置，請允許定位權限並開啟手機定位服務。"); },
+        position => {
+            if (requestVersion !== liveLocationRequestVersion) return;
+            updateLiveLocationMarker(position, first);
+            first = false;
+        },
+        error => {
+            if (requestVersion !== liveLocationRequestVersion) return;
+            console.error(error);
+            stopLiveLocation();
+            alert("無法取得即時位置，請允許定位權限並開啟手機定位服務。");
+        },
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 1000 }
     );
 }
 
+let mobileViewportFrame = null;
+let lastMobileViewportHeight = 0;
+let lastMobileViewportWidth = 0;
+
+function syncMobileViewport() {
+    const isMobile = window.matchMedia("(max-width: 800px)").matches;
+    const viewport = window.visualViewport;
+    // Leave accessibility pinch zoom under browser control.
+    if (isMobile && viewport && Math.abs(viewport.scale - 1) > 0.01) return;
+    if (isMobile) {
+        const height = Math.round(viewport?.height || window.innerHeight);
+        const width = Math.round(window.innerWidth);
+        if (height > 0 && (height !== lastMobileViewportHeight || width !== lastMobileViewportWidth)) {
+            document.documentElement.style.setProperty("--mobile-viewport-height", height + "px");
+            lastMobileViewportHeight = height;
+            lastMobileViewportWidth = width;
+            map.invalidateSize({ pan: false, debounceMoveend: true });
+        }
+        // Recover the document position after iOS keyboard/app switching, without
+        // fighting the browser's scrolling while the user is typing.
+        const typing = document.activeElement?.matches?.("input, textarea, select, [contenteditable='true']");
+        if (!typing && (window.scrollY !== 0 || window.scrollX !== 0)) window.scrollTo(0, 0);
+    } else {
+        document.documentElement.style.removeProperty("--mobile-viewport-height");
+        lastMobileViewportHeight = 0;
+        lastMobileViewportWidth = 0;
+        map.invalidateSize({ pan: false, debounceMoveend: true });
+    }
+}
+
+function scheduleMobileViewportSync() {
+    if (mobileViewportFrame !== null) return;
+    mobileViewportFrame = window.requestAnimationFrame(() => {
+        mobileViewportFrame = null;
+        syncMobileViewport();
+    });
+}
+
+window.visualViewport?.addEventListener("resize", scheduleMobileViewportSync);
+window.visualViewport?.addEventListener("scroll", scheduleMobileViewportSync);
+window.addEventListener("pageshow", scheduleMobileViewportSync);
+window.addEventListener("orientationchange", () => window.setTimeout(scheduleMobileViewportSync, 180));
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") scheduleMobileViewportSync();
+});
+document.addEventListener("focusout", () => window.setTimeout(scheduleMobileViewportSync, 180));
+scheduleMobileViewportSync();
+
 function openMobileSidebar() {
+    scheduleMobileViewportSync();
     sidebar.classList.add("mobile-open");
     screenOverlay.classList.remove("hidden");
 }
@@ -3242,7 +3302,7 @@ cancelImportButton.addEventListener(
 );
 
 window.addEventListener("resize", () => {
-    map.invalidateSize();
+    scheduleMobileViewportSync();
 });
 
 updateCoordinateDisplay(

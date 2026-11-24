@@ -1009,3 +1009,61 @@ button {
 .point-traverse-delete-button { flex:0 0 auto; padding:3px 7px; border:1px solid #dc2626; border-radius:6px; background:#fff; color:#dc2626; font-size:.76rem; font-weight:700; cursor:pointer; }
 .point-traverse-delete-button:hover { background:#dc2626; color:#fff; }
 .traverse-popup-empty { margin:8px 0; color:#64748b; }
+
+/* Keep iPhone app chrome anchored when the keyboard or browser viewport changes. */
+@media (max-width: 800px) {
+    :root {
+        --mobile-viewport-height: 100vh;
+        --mobile-header-height: calc(var(--header-height) + env(safe-area-inset-top, 0px));
+    }
+    @supports (height: 100dvh) {
+        :root { --mobile-viewport-height: 100dvh; }
+    }
+    html, body {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: var(--mobile-viewport-height);
+        overflow: hidden;
+        overscroll-behavior: none;
+    }
+    .app-header {
+        position: fixed;
+        inset: 0 0 auto 0;
+        height: var(--mobile-header-height);
+        padding: env(safe-area-inset-top, 0px) 8px 0;
+    }
+    .header-menu-button { flex: 0 0 42px; margin-right: 4px; }
+    .app-header > div:not(.header-user-panel) { flex: 1 1 auto; min-width: 0; }
+    .header-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .header-user-panel { flex: 0 0 auto; gap: 5px; margin-left: 6px; }
+    .app-shell {
+        position: fixed;
+        top: var(--mobile-header-height);
+        right: 0;
+        left: 0;
+        height: calc(var(--mobile-viewport-height) - var(--mobile-header-height));
+        min-height: 0;
+    }
+    .sidebar {
+        top: var(--mobile-header-height);
+        bottom: auto;
+        height: calc(var(--mobile-viewport-height) - var(--mobile-header-height));
+    }
+    .sidebar-scroll {
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+    .screen-overlay {
+        top: var(--mobile-header-height);
+        bottom: auto;
+        height: calc(var(--mobile-viewport-height) - var(--mobile-header-height));
+    }
+    /* Sub-16px fields cause Safari to zoom the page on focus. */
+    input, select, textarea, .text-input { font-size: 16px; }
+    .app-dialog, .photo-dialog {
+        max-height: calc(var(--mobile-viewport-height) - 24px);
+    }
+    .coordinate-panel { bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
+}
