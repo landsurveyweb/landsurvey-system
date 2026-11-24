@@ -220,6 +220,16 @@ let traverseBuildState = null;
 let activeTraversePointId = null;
 let liveLocationWatchId = null;
 let liveLocationRequestVersion = 0;
+let liveNearbyEnabled = false;
+let liveNearbyVersion = 0;
+let liveNearbyInFlight = false;
+let pendingLiveNearby = null;
+let lastLiveNearbyAttempt = null;
+let lastLiveNearbySuccess = null;
+const liveSectionLayer = L.geoJSON(null, {
+    style: { color: "#2563eb", weight: 3, fillOpacity: 0, dashArray: "8 5" },
+    interactive: false
+}).addTo(map);
 let liveLocationMarker = null;
 let liveLocationAccuracyCircle = null;
 let parcelSectionCatalog = [];
@@ -1221,6 +1231,7 @@ async function refreshSessionAddedPoints(version) {
 }
 
 async function selectPointScope(scope, fitBounds = false) {
+    if (!scope.liveLocation && liveNearbyEnabled) pauseLiveNearby();
     currentPointScope = scope;
     ++pointSearchVersion;
     clearPointDisplay();
@@ -1393,6 +1404,7 @@ function locatePoint(point) {
 }
 
 async function searchPoints() {
+    if (liveNearbyEnabled) pauseLiveNearby();
     ++addressLoadVersion;
     const keyword = document.getElementById("pointSearchInput").value.trim();
     const panel = document.getElementById("searchResultPanel");
@@ -2736,8 +2748,76 @@ function updateLiveLocationMarker(position, centerMap = false) {
     if (centerMap) map.setView(latLng, Math.max(map.getZoom(), 18));
 }
 
+function setLiveNearbyStatus(text) {
+    const element = document.getElementById("liveLocationStatus");
+    if (element) element.textContent = text;
+}
+
+function pauseLiveNearby() {
+    liveNearbyEnabled = false;
+    ++liveNearbyVersion;
+    pendingLiveNearby = null;
+    liveSectionLayer.clearLayers();
+    if (currentPointScope.liveLocation) ++pointLoadVersion;
+    setLiveNearbyStatus("定位持續中；已切換為手動查詢範圍。");
+}
+
+async function refreshLiveNearby(position, requestVersion) {
+    if (!liveNearbyEnabled || requestVersion !== liveLocationRequestVersion) return;
+    const latitude = Number(position.coords.latitude), longitude = Number(position.coords.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return;
+    if (liveNearbyInFlight) {
+        pendingLiveNearby = { position, requestVersion };
+        return;
+    }
+    const { x, y } = toTwd97(latitude, longitude);
+    const now = Date.now();
+    if (lastLiveNearbyAttempt !== null && now - lastLiveNearbyAttempt < 10000) return;
+    if (lastLiveNearbySuccess && Math.hypot(x - lastLiveNearbySuccess.x, y - lastLiveNearbySuccess.y) < 20 &&
+        now - lastLiveNearbySuccess.time < 30000) return;
+    lastLiveNearbyAttempt = now;
+    liveNearbyInFlight = true;
+    const version = liveNearbyVersion;
+    const current = () => liveNearbyEnabled && version === liveNearbyVersion && requestVersion === liveLocationRequestVersion;
+    setLiveNearbyStatus("正在載入所在小段段界與周圍 200 公尺點位……");
+    try {
+        let context = null;
+        try {
+            const response = await fetch("/api/system/location-context?longitude=" + encodeURIComponent(longitude) +
+                "&latitude=" + encodeURIComponent(latitude));
+            if (!response.ok) throw new Error("段界載入失敗");
+            context = await response.json();
+        } catch (error) { console.error(error); }
+        if (!current()) return;
+        const loaded = await selectPointScope({ type: "near", x, y, liveLocation: true });
+        if (!current()) return;
+        liveSectionLayer.clearLayers();
+        if (context?.feature) liveSectionLayer.addData(context.feature);
+        if (!map.hasLayer(liveSectionLayer)) liveSectionLayer.addTo(map);
+        const sectionText = context?.sectionName || (context ? "目前位置無段界資料" : "段界載入失敗");
+        setLiveNearbyStatus(loaded
+            ? sectionText + "｜200 公尺內 " + scopedPointCount.toLocaleString() + " 筆點位。"
+            : sectionText + "｜點位載入失敗，稍後重試。");
+        if (loaded) lastLiveNearbySuccess = { x, y, time: now };
+    } catch (error) {
+        if (current()) {
+            console.error(error);
+            setLiveNearbyStatus("定位正常，周圍資料載入失敗，稍後重試。");
+        }
+    } finally {
+        liveNearbyInFlight = false;
+        const pending = pendingLiveNearby;
+        pendingLiveNearby = null;
+        if (pending) void refreshLiveNearby(pending.position, pending.requestVersion);
+    }
+}
+
 function stopLiveLocation() {
     ++liveLocationRequestVersion;
+    pauseLiveNearby();
+    lastLiveNearbyAttempt = null;
+    lastLiveNearbySuccess = null;
+    setLiveNearbyStatus("已停止即時定位與周邊自動更新。");
     if (liveLocationWatchId !== null) navigator.geolocation.clearWatch(liveLocationWatchId);
     liveLocationWatchId = null;
     const button = document.getElementById("locateButton");
@@ -2755,12 +2835,17 @@ function toggleLiveLocation() {
     showMessage("正在開啟即時定位……");
     closeMobileSidebar();
     const requestVersion = ++liveLocationRequestVersion;
+    liveNearbyEnabled = true;
+    ++liveNearbyVersion;
+    lastLiveNearbyAttempt = null;
+    lastLiveNearbySuccess = null;
     let first = true;
     liveLocationWatchId = navigator.geolocation.watchPosition(
         position => {
             if (requestVersion !== liveLocationRequestVersion) return;
             updateLiveLocationMarker(position, first);
             first = false;
+            void refreshLiveNearby(position, requestVersion);
         },
         error => {
             if (requestVersion !== liveLocationRequestVersion) return;

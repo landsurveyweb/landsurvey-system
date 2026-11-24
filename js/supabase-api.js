@@ -31,14 +31,18 @@ const pointInPolygon = (longitude, latitude, rings) =>
     rings.length > 0 && pointInRing(longitude, latitude, rings[0]) &&
     !rings.slice(1).some(ring => pointInRing(longitude, latitude, ring));
 
-async function findSectionName(longitude, latitude) {
+async function findSectionFeature(longitude, latitude) {
     const features = await loadSectionFeatures();
-    const feature = features.find(item => {
+    return features.find(item => {
         const geometry = item.geometry;
         if (geometry?.type === "Polygon") return pointInPolygon(longitude, latitude, geometry.coordinates);
         if (geometry?.type === "MultiPolygon") return geometry.coordinates.some(polygon => pointInPolygon(longitude, latitude, polygon));
         return false;
     });
+}
+
+async function findSectionName(longitude, latitude) {
+    const feature = await findSectionFeature(longitude, latitude);
     return feature?.properties?.fullName || feature?.properties?.sectionName || null;
 }
 
@@ -545,7 +549,7 @@ export function installApiAdapter(supabase, user) {
                 return new Response(await response.text(), { headers: { "Content-Type": "application/geo+json; charset=utf-8" } });
             }
 
-            if (url.pathname === "/api/addresses/district" && method === "GET") {
+            if (["/api/addresses/district", "/api/system/location-context"].includes(url.pathname) && method === "GET") {
                 const longitudeText = url.searchParams.get("longitude");
                 const latitudeText = url.searchParams.get("latitude");
                 const longitude = Number(longitudeText), latitude = Number(latitudeText);
@@ -554,9 +558,11 @@ export function installApiAdapter(supabase, user) {
                     throw new Error("地址座標不正確。");
                 }
                 // Resolve against this project's section polygons, not ambiguous address text.
-                const sectionName = await findSectionName(longitude, latitude);
+                const feature = await findSectionFeature(longitude, latitude);
+                const sectionName = feature?.properties?.fullName || feature?.properties?.sectionName || null;
                 const districtName = sectionName?.match(/^(.+?區)/)?.[1] || null;
-                return jsonResponse({ districtName, sectionName });
+                return jsonResponse({ districtName, sectionName,
+                    ...(url.pathname === "/api/system/location-context" ? { feature: feature || null } : {}) });
             }
 
             if (url.pathname === "/api/addresses/search" && method === "GET") {
