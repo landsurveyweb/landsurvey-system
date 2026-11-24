@@ -594,7 +594,7 @@ export function installApiAdapter(supabase, user) {
                 if (url.pathname === "/api/system/location-context") {
                     const [x, y] = window.proj4("EPSG:4326", "EPSG:3826", [longitude, latitude]);
                     const nearbySections = (await loadSectionFeatures()).filter(item =>
-                        item.geometry && metricGeometryIntersectsCircle(projectMetricGeometry(item.geometry), x, y));
+                        item.geometry && metricGeometryIntersectsCircle(projectMetricGeometry(item.geometry), x, y, 100));
                     return jsonResponse({ districtName, sectionName, feature: feature || null, nearbySections });
                 }
                 return jsonResponse({ districtName, sectionName });

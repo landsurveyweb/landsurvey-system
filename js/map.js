@@ -2792,7 +2792,7 @@ async function loadLiveCadastral(context, current, center) {
         parcelLayer.clearLayers();
         loadedParcelSectionCode = "";
         liveLoadedParcelCode = null;
-        return { ok: context !== null, message: context ? "200 公尺內無可用地籍圖資料" : "地籍範圍判定失敗" };
+        return { ok: context !== null, message: context ? "100 公尺內無可用地籍圖資料" : "地籍範圍判定失敗" };
     }
     if (!Number.isFinite(center?.x) || !Number.isFinite(center?.y)) return { ok: false, message: "定位中心座標不正確" };
     const results = await Promise.all([...sections].map(async ([code, name]) => {
@@ -2804,7 +2804,7 @@ async function loadLiveCadastral(context, current, center) {
     for (const result of results) {
         if (result.error) { failures.push(result.code); continue; }
         for (const row of result.rows) {
-            if (window.landSurveyGeometry.metricGeometryIntersectsCircle(row.metric, center.x, center.y)) features.push(row.feature);
+            if (window.landSurveyGeometry.metricGeometryIntersectsCircle(row.metric, center.x, center.y, 100)) features.push(row.feature);
         }
     }
     const signature = "nearby:" + [...sections.keys()].sort().join(",");
@@ -2821,7 +2821,7 @@ async function loadLiveCadastral(context, current, center) {
     }
     return {
         ok: failures.length === 0,
-        message: "200 公尺內 " + features.length.toLocaleString() + " 筆地籍" +
+        message: "100 公尺內 " + features.length.toLocaleString() + " 筆地籍" +
             (failures.length ? "；小段 " + failures.join("、") + " 下載失敗，稍後重試" : "")
     };
 }
@@ -2857,7 +2857,7 @@ async function refreshLiveNearby(position, requestVersion) {
     liveNearbyInFlight = true;
     const version = liveNearbyVersion;
     const current = () => liveNearbyEnabled && version === liveNearbyVersion && requestVersion === liveLocationRequestVersion;
-    setLiveNearbyStatus("正在載入周圍 200 公尺地籍圖與點位……");
+    setLiveNearbyStatus("正在載入周圍 100 公尺地籍圖、200 公尺內點位……");
     try {
         let context = null;
         try {
